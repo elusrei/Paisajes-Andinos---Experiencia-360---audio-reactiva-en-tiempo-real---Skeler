@@ -28,6 +28,8 @@ class DomeViewer {
         this.settingsDrawer = document.getElementById('settings-drawer');
         this.dropzone = document.getElementById('dropzone');
         this.toastContainer = document.getElementById('toast-container');
+        this.bufferingSpinner = document.getElementById('buffering-spinner');
+        this.bufferingText = document.getElementById('buffering-text');
 
         // Estado Three.js
         this.scene = null;
@@ -48,6 +50,7 @@ class DomeViewer {
         this.standbyVideo = this.videoB;
         this.totalDuration = this.segments[this.segments.length - 1].end;
         this.isTransitioning = false;
+        this.standbyLoaded = false;
 
         // Estado de Navegación de Cámara
         this.isDragging = false;
@@ -104,7 +107,7 @@ class DomeViewer {
         this.scene = new THREE.Scene();
         this.scene.background = new THREE.Color(0x05070c);
 
-        // 2. Cámara (situada en el centro geométrico del domo)
+        // 2. Cámara
         const aspect = window.innerWidth / window.innerHeight;
         this.camera = new THREE.PerspectiveCamera(this.fov, aspect, 0.1, 2000);
         this.camera.position.set(0, 0, 0);
@@ -155,7 +158,7 @@ class DomeViewer {
             uniforms: uniforms,
             vertexShader: DomeShader.vertexShader,
             fragmentShader: DomeShader.fragmentShader,
-            side: THREE.BackSide // Renderizar cara interior
+            side: THREE.BackSide
         });
 
         // 6. Geometría de Domo / Esfera
@@ -163,14 +166,13 @@ class DomeViewer {
         this.domeMesh = new THREE.Mesh(domeGeometry, this.domeMaterial);
         this.scene.add(this.domeMesh);
 
-        // 7. Rejilla y Marcadores de Horizonte Planetario
+        // 7. Rejilla de Horizonte
         this.createHorizonMarkers();
     }
 
     createHorizonMarkers() {
         const horizonGroup = new THREE.Group();
 
-        // Anillo de horizonte
         const ringGeo = new THREE.RingGeometry(585, 595, 64);
         const ringMat = new THREE.MeshBasicMaterial({
             color: 0x00f0ff,
@@ -183,7 +185,6 @@ class DomeViewer {
         ringMesh.position.y = -0.1;
         horizonGroup.add(ringMesh);
 
-        // Líneas guía cardinales (N, S, E, O)
         const lineMat = new THREE.LineBasicMaterial({ color: 0x00f0ff, transparent: true, opacity: 0.3 });
         const directions = [
             { x: 0, z: 590, name: 'FRENTE (S)' },
@@ -217,22 +218,15 @@ class DomeViewer {
                 }
             })
             .catch(() => {
-                // Fallback ya configurado
+                // Fallback a DEFAULT_SEGMENTS
             });
 
-        // Configurar fuentes iniciales
         this.setupVideoEvents(this.videoA, 'A');
         this.setupVideoEvents(this.videoB, 'B');
 
-        // Cargar primer segmento en Video A
+        // Cargar primer segmento en Video A con prioridad
         this.videoA.src = this.segments[0].file;
         this.videoA.load();
-
-        // Precargar segundo segmento en Video B
-        if (this.segments.length > 1) {
-            this.videoB.src = this.segments[1].file;
-            this.videoB.load();
-        }
 
         this.updateTotalDuration();
     }
@@ -263,6 +257,14 @@ class DomeViewer {
         videoEl.addEventListener('play', () => {
             if (videoEl === this.activeVideo) {
                 this.setPlayState(true);
+                this.hideBuffering();
+
+                // Iniciar precarga del segundo segmento cuando el primero empiece a sonar
+                if (!this.standbyLoaded && this.segments.length > 1) {
+                    this.standbyVideo.src = this.segments[1].file;
+                    this.standbyVideo.load();
+                    this.standbyLoaded = true;
+                }
             }
         });
 
@@ -272,9 +274,44 @@ class DomeViewer {
             }
         });
 
+        videoEl.addEventListener('waiting', () => {
+            if (videoEl === this.activeVideo && this.isPlaying) {
+                this.showBuffering('Cargando 4K...');
+            }
+        });
+
+        videoEl.addEventListener('playing', () => {
+            if (videoEl === this.activeVideo) {
+                this.hideBuffering();
+            }
+        });
+
+        videoEl.addEventListener('canplay', () => {
+            if (videoEl === this.activeVideo && this.isPlaying) {
+                this.hideBuffering();
+            }
+        });
+
         videoEl.addEventListener('error', (e) => {
             console.warn(`Video ${id} error:`, e);
+            if (videoEl === this.activeVideo) {
+                this.hideBuffering();
+                this.showToast('Error cargando el segmento de video. Reintentando...', 4000);
+            }
         });
+    }
+
+    showBuffering(text = 'Cargando 4K...') {
+        if (this.bufferingSpinner) {
+            if (this.bufferingText) this.bufferingText.textContent = text;
+            this.bufferingSpinner.classList.remove('hidden');
+        }
+    }
+
+    hideBuffering() {
+        if (this.bufferingSpinner) {
+            this.bufferingSpinner.classList.add('hidden');
+        }
     }
 
     onActiveTimeUpdate() {
@@ -284,7 +321,14 @@ class DomeViewer {
         const globalTime = seg.start + this.activeVideo.currentTime;
         this.updateTimelineWithTime(globalTime);
 
-        // Precarga y transición suave antes del final
+        // Precargar siguiente segmento en standby si aún no se hizo
+        const nextIndex = (this.currentSegmentIndex + 1) % this.segments.length;
+        if (!this.standbyVideo.src || this.standbyVideo.src.indexOf(this.segments[nextIndex].file) === -1) {
+            this.standbyVideo.src = this.segments[nextIndex].file;
+            this.standbyVideo.load();
+        }
+
+        // Transición suave justo antes de terminar
         const remaining = seg.duration - this.activeVideo.currentTime;
         if (remaining <= 0.12 && remaining > 0 && !this.isTransitioning) {
             this.transitionToNextSegment();
@@ -309,10 +353,8 @@ class DomeViewer {
         this.standbyVideo = nextStandby;
         this.activeTexture = nextTexture;
 
-        // Actualizar textura Three.js inmediatamente
         this.domeMaterial.uniforms.tVideo.value = this.activeTexture;
 
-        // Sincronizar parámetros
         this.activeVideo.volume = this.standbyVideo.volume;
         this.activeVideo.muted = this.standbyVideo.muted;
         this.activeVideo.playbackRate = this.playbackSpeeds[this.speedIndex];
@@ -324,7 +366,7 @@ class DomeViewer {
             }
         }
 
-        // Precargar el segmento subsiguiente en el standby
+        // Precargar subsiguiente
         const futureIndex = (nextIndex + 1) % this.segments.length;
         this.standbyVideo.src = this.segments[futureIndex].file;
         this.standbyVideo.load();
@@ -357,6 +399,7 @@ class DomeViewer {
         const targetSeg = this.segments[targetIndex];
         const offsetInSegment = targetTime - targetSeg.start;
 
+        this.showBuffering('Saltando...');
         this.currentSegmentIndex = targetIndex;
         this.activeVideo.src = targetSeg.file;
         this.activeVideo.currentTime = offsetInSegment;
@@ -365,7 +408,6 @@ class DomeViewer {
             this.activeVideo.play().catch(e => console.warn("Seek play error:", e));
         }
 
-        // Precargar siguiente en standby
         const nextIndex = (targetIndex + 1) % this.segments.length;
         this.standbyVideo.src = this.segments[nextIndex].file;
         this.standbyVideo.load();
@@ -379,19 +421,15 @@ class DomeViewer {
     initEvents() {
         window.addEventListener('resize', () => this.onWindowResize());
 
-        // Ratón / Puntero para navegar la cámara
         this.container.addEventListener('pointerdown', (e) => this.onPointerDown(e));
         window.addEventListener('pointermove', (e) => this.onPointerMove(e));
         window.addEventListener('pointerup', () => this.onPointerUp());
 
-        // Zoom con Rueda del Ratón
         this.container.addEventListener('wheel', (e) => this.onWheel(e), { passive: false });
 
-        // Atajos de Teclado
         window.addEventListener('keydown', (e) => this.onKeyDown(e));
         window.addEventListener('keyup', (e) => this.onKeyUp(e));
 
-        // Drag and Drop de archivos de video
         window.addEventListener('dragover', (e) => {
             e.preventDefault();
             this.dropzone.classList.add('active');
@@ -479,13 +517,13 @@ class DomeViewer {
        CONSTRUCCIÓN Y EVENTOS DE INTERFAZ (UI & CONTROLES)
        -------------------------------------------------------------------------- */
     initUI() {
-        // Botón Start Splash (Soporta btn-enter y btn-start-experience)
         const btnStart = document.getElementById('btn-enter') || document.getElementById('btn-start-experience');
         const handleStart = (e) => {
             if (e) e.stopPropagation();
             if (this.splashScreen) {
                 this.splashScreen.classList.add('hidden');
             }
+            this.showBuffering('Iniciando 4K...');
             this.playVideo();
         };
 
@@ -501,7 +539,6 @@ class DomeViewer {
             });
         }
 
-        // Botón Play/Pausa (Soporta btn-play-pause y btn-play)
         const playBtn = document.getElementById('btn-play-pause') || document.getElementById('btn-play');
         if (playBtn) {
             playBtn.addEventListener('click', (e) => {
@@ -510,7 +547,6 @@ class DomeViewer {
             });
         }
 
-        // Botón Volumen / Mute
         const muteBtn = document.getElementById('btn-mute');
         if (muteBtn) {
             muteBtn.addEventListener('click', (e) => {
@@ -531,7 +567,6 @@ class DomeViewer {
             });
         }
 
-        // Timeline Scrubbing
         const timelineContainer = document.getElementById('timeline-container');
         if (timelineContainer) {
             timelineContainer.addEventListener('mousedown', (e) => this.startScrubbing(e));
@@ -543,7 +578,6 @@ class DomeViewer {
             });
         }
 
-        // Velocidad de Reproducción
         const btnSpeed = document.getElementById('btn-speed');
         if (btnSpeed) {
             btnSpeed.addEventListener('click', () => {
@@ -556,7 +590,6 @@ class DomeViewer {
             });
         }
 
-        // Auto-rotación
         const autoRotBtn = document.getElementById('btn-auto-rotate');
         if (autoRotBtn) {
             autoRotBtn.addEventListener('click', () => {
@@ -566,7 +599,6 @@ class DomeViewer {
             });
         }
 
-        // Conmutador de Proyección Fisheye / Equirectangular
         const projToggleBtn = document.getElementById('btn-projection-toggle');
         if (projToggleBtn) {
             projToggleBtn.addEventListener('click', () => {
@@ -580,7 +612,6 @@ class DomeViewer {
             });
         }
 
-        // Conmutador Semiesfera / Esfera Completa
         const btnToggleHemi = document.getElementById('btn-toggle-hemi');
         if (btnToggleHemi) {
             btnToggleHemi.addEventListener('click', () => {
@@ -593,7 +624,6 @@ class DomeViewer {
             });
         }
 
-        // Cargar Archivo Local
         const btnLoadFile = document.getElementById('btn-load-file');
         if (btnLoadFile) {
             btnLoadFile.addEventListener('click', () => this.fileInput.click());
@@ -606,15 +636,12 @@ class DomeViewer {
             });
         }
 
-        // Captura de pantalla
         const btnSnapshot = document.getElementById('btn-snapshot');
         if (btnSnapshot) btnSnapshot.addEventListener('click', () => this.takeSnapshot());
 
-        // Pantalla Completa
         const btnFullscreen = document.getElementById('btn-fullscreen');
         if (btnFullscreen) btnFullscreen.addEventListener('click', () => this.toggleFullscreen());
 
-        // Drawer de Calibración
         const btnSettings = document.getElementById('btn-settings-toggle');
         const btnCloseSettings = document.getElementById('btn-close-settings');
         if (btnSettings) {
@@ -624,10 +651,8 @@ class DomeViewer {
             btnCloseSettings.addEventListener('click', () => this.settingsDrawer.classList.remove('open'));
         }
 
-        // Controles de Calibración
         this.initCalibrationControls();
 
-        // Presets de Cámara
         document.querySelectorAll('.btn-preset').forEach(btn => {
             btn.addEventListener('click', (e) => {
                 document.querySelectorAll('.btn-preset').forEach(b => b.classList.remove('active'));
@@ -638,7 +663,6 @@ class DomeViewer {
             });
         });
 
-        // Widget Brújula
         const compWidget = document.getElementById('orientation-widget') || document.getElementById('compass-widget');
         if (compWidget) {
             compWidget.addEventListener('click', () => {
@@ -761,36 +785,44 @@ class DomeViewer {
             }
         }
 
+        this.isPlaying = true;
+        this.setPlayState(true);
+
         const playPromise = this.activeVideo.play();
         if (playPromise !== undefined) {
             playPromise.then(() => {
                 this.setPlayState(true);
+                this.hideBuffering();
             }).catch(err => {
-                console.warn('Autoplay prevenido:', err);
+                console.warn('Autoplay con audio prevenido:', err);
                 // Si el navegador bloqueó audio, reintentar silenciado
                 this.activeVideo.muted = true;
                 this.videoA.muted = true;
                 this.videoB.muted = true;
                 this.activeVideo.play().then(() => {
                     this.setPlayState(true);
+                    this.hideBuffering();
                     this.updateVolumeIcons();
                     this.showToast('Reproduciendo en silencio. Clic en altavoz para sonido.', 4000);
                 }).catch(e => {
                     console.error('Error al reproducir:', e);
                     this.setPlayState(false);
+                    this.hideBuffering();
                 });
             });
         }
     }
 
     pauseVideo() {
+        this.isPlaying = false;
         this.activeVideo.pause();
         this.standbyVideo.pause();
         this.setPlayState(false);
+        this.hideBuffering();
     }
 
     togglePlay() {
-        if (this.activeVideo.paused) {
+        if (this.activeVideo.paused || !this.isPlaying) {
             this.playVideo();
         } else {
             this.pauseVideo();
@@ -850,7 +882,6 @@ class DomeViewer {
         if (handle) handle.style.left = `${progress}%`;
         if (tCur) tCur.textContent = this.formatTime(currentTime);
 
-        // Buffer progress
         if (this.activeVideo.buffered.length > 0) {
             const bufferedLocal = this.activeVideo.buffered.end(this.activeVideo.buffered.length - 1);
             const segStart = this.isSegmentedMode ? (this.segments[this.currentSegmentIndex]?.start || 0) : 0;
@@ -968,7 +999,7 @@ class DomeViewer {
     animate() {
         requestAnimationFrame(() => this.animate());
 
-        // 1. Forzar actualización de textura de video en WebGL si hay datos
+        // 1. Forzar actualización de textura de video en WebGL
         if (this.activeVideo && this.activeVideo.readyState >= this.activeVideo.HAVE_CURRENT_DATA) {
             if (this.activeTexture) {
                 this.activeTexture.needsUpdate = true;

@@ -850,3 +850,47 @@ input:checked + .slider-toggle:before {
         right: 1.25rem;
     }
 }
+
+/* Spinner de Carga y Buffering */
+.buffering-spinner {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    z-index: 80;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.85rem;
+    padding: 1.25rem 1.75rem;
+    border-radius: var(--radius-md);
+    background: rgba(7, 9, 14, 0.85);
+    backdrop-filter: blur(16px);
+    border: 1px solid var(--border-glow);
+    color: var(--primary);
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    letter-spacing: 0.05em;
+    pointer-events: none;
+    transition: opacity 0.25s ease, visibility 0.25s ease;
+    box-shadow: 0 0 30px rgba(0, 240, 255, 0.2);
+}
+
+.buffering-spinner.hidden {
+    opacity: 0;
+    visibility: hidden;
+}
+
+.spinner-ring {
+    width: 38px;
+    height: 38px;
+    border: 3px solid rgba(0, 240, 255, 0.2);
+    border-top: 3px solid var(--primary);
+    border-radius: 50%;
+    animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
