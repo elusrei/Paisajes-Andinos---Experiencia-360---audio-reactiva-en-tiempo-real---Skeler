@@ -480,12 +480,25 @@ class DomeViewer {
        CONSTRUCCIÓN Y EVENTOS DE INTERFAZ (UI & CONTROLES)
        -------------------------------------------------------------------------- */
     initUI() {
-        // Botón Start Splash
-        const btnStart = document.getElementById('btn-start-experience');
-        if (btnStart) {
-            btnStart.addEventListener('click', () => {
+        // Botón Start Splash (Soporta btn-enter y btn-start-experience)
+        const btnStart = document.getElementById('btn-enter') || document.getElementById('btn-start-experience');
+        const handleStart = (e) => {
+            if (e) e.stopPropagation();
+            if (this.splashScreen) {
                 this.splashScreen.classList.add('hidden');
-                this.playVideo();
+            }
+            this.playVideo();
+        };
+
+        if (btnStart) {
+            btnStart.addEventListener('click', handleStart);
+        }
+
+        if (this.splashScreen) {
+            this.splashScreen.addEventListener('click', (e) => {
+                if (e.target === this.splashScreen) {
+                    handleStart(e);
+                }
             });
         }
 
@@ -666,13 +679,32 @@ class DomeViewer {
        ACCIONES DE REPRODUCCIÓN Y CONTROL
        -------------------------------------------------------------------------- */
     playVideo() {
+        if (!this.activeVideo.src || this.activeVideo.src === window.location.href) {
+            const seg = this.segments[this.currentSegmentIndex] || this.segments[0];
+            if (seg) {
+                this.activeVideo.src = seg.file;
+                this.activeVideo.load();
+            }
+        }
+
         const playPromise = this.activeVideo.play();
         if (playPromise !== undefined) {
             playPromise.then(() => {
                 this.setPlayState(true);
             }).catch(err => {
-                console.warn('Autoplay prevenido:', err);
-                this.setPlayState(false);
+                console.warn('Autoplay prevenido por el navegador:', err);
+                // Si el navegador bloqueó la reproducción automática con audio, reintentar silenciado
+                this.activeVideo.muted = true;
+                this.videoA.muted = true;
+                this.videoB.muted = true;
+                this.activeVideo.play().then(() => {
+                    this.setPlayState(true);
+                    this.updateVolumeIcons();
+                    this.showToast('Reproduciendo en silencio. Clic en el altavoz para activar el audio.', 4000);
+                }).catch(e => {
+                    console.error('Error al iniciar reproducción:', e);
+                    this.setPlayState(false);
+                });
             });
         }
     }
