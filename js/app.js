@@ -1,7 +1,7 @@
 /**
  * ==========================================================================
  * DOME 360° MASTER VIEWER - CONTROLADOR PRINCIPAL THREE.JS & REPRODUCTOR
- * CON SOPORTE PARA SEGMENTACIÓN 4K CONTINUA Y DOBLE BÚFER (PING-PONG)
+ * CON SOPORTE PARA SEGMENTACIÓN 4K CONTINUA, DOBLE BÚFER Y PANEL DE DEBUG
  * ==========================================================================
  */
 
@@ -14,6 +14,14 @@ const DEFAULT_SEGMENTS = [
     { file: "segments/segment_05.mp4", start: 143.223, duration: 28.867, end: 172.090 },
     { file: "segments/segment_06.mp4", start: 172.090, duration: 24.033, end: 196.123 },
     { file: "segments/segment_07.mp4", start: 196.123, duration: 22.133, end: 218.257 }
+];
+
+const READY_STATE_MAP = [
+    '0: HAVE_NOTHING',
+    '1: HAVE_METADATA',
+    '2: HAVE_CURRENT_DATA',
+    '3: HAVE_FUTURE_DATA',
+    '4: HAVE_ENOUGH_DATA'
 ];
 
 class DomeViewer {
@@ -30,6 +38,7 @@ class DomeViewer {
         this.toastContainer = document.getElementById('toast-container');
         this.bufferingSpinner = document.getElementById('buffering-spinner');
         this.bufferingText = document.getElementById('buffering-text');
+        this.debugPanel = document.getElementById('debug-panel');
 
         // Estado Three.js
         this.scene = null;
@@ -91,12 +100,22 @@ class DomeViewer {
         // Temporizador de inactividad de UI
         this.uiTimeout = null;
 
+        // Diagnóstico / Debug
+        this.debugLogs = [];
+        this.frameCount = 0;
+        this.lastFpsUpdate = performance.now();
+        this.currentFps = 60;
+        this.pipActive = false;
+
         // Inicialización
         this.initThree();
         this.initSegmentEngine();
         this.initEvents();
         this.initUI();
+        this.initDebug();
         this.animate();
+
+        this.logDebug('Visor 360 inicializado correctamente', 'success');
     }
 
     /* --------------------------------------------------------------------------
@@ -222,24 +241,31 @@ class DomeViewer {
                     }));
                     this.totalDuration = this.segments[this.segments.length - 1].end;
                     this.updateTotalDuration();
+                    this.logDebug(`Manifest cargado: ${this.segments.length} segmentos (Duración total: ${this.totalDuration.toFixed(1)}s)`, 'info');
                 }
             })
-            .catch(() => {
-                // Fallback a DEFAULT_SEGMENTS
+            .catch((err) => {
+                this.logDebug(`Uso de lista por defecto (${this.segments.length} segmentos)`, 'info');
             });
 
-        this.setupVideoEvents(this.videoA, 'A');
-        this.setupVideoEvents(this.videoB, 'B');
+        this.setupVideoEvents(this.videoA, 'Video A');
+        this.setupVideoEvents(this.videoB, 'Video B');
 
         // Cargar primer segmento en Video A con prioridad
         this.videoA.src = this.segments[0].file;
         this.videoA.load();
+        this.logDebug(`Cargando segmento inicial: ${this.segments[0].file}`, 'info');
 
         this.updateTotalDuration();
     }
 
-    setupVideoEvents(videoEl, id) {
+    setupVideoEvents(videoEl, name) {
+        videoEl.addEventListener('loadstart', () => {
+            this.logDebug(`[${name}] loadstart: ${videoEl.src.split('/').pop()}`, 'info');
+        });
+
         videoEl.addEventListener('loadedmetadata', () => {
+            this.logDebug(`[${name}] loadedmetadata: ${videoEl.videoWidth}x${videoEl.videoHeight} (${videoEl.duration.toFixed(1)}s)`, 'success');
             if (videoEl === this.activeVideo) {
                 if (videoEl.videoWidth && videoEl.videoHeight) {
                     const aspect = videoEl.videoWidth / videoEl.videoHeight;
@@ -249,6 +275,10 @@ class DomeViewer {
             }
         });
 
+        videoEl.addEventListener('loadeddata', () => {
+            this.logDebug(`[${name}] loadeddata listo`, 'info');
+        });
+
         videoEl.addEventListener('timeupdate', () => {
             if (videoEl === this.activeVideo && !this.isScrubbing) {
                 this.onActiveTimeUpdate();
@@ -256,40 +286,46 @@ class DomeViewer {
         });
 
         videoEl.addEventListener('ended', () => {
+            this.logDebug(`[${name}] ended (fin del segmento)`, 'info');
             if (videoEl === this.activeVideo) {
                 this.transitionToNextSegment();
             }
         });
 
         videoEl.addEventListener('play', () => {
+            this.logDebug(`[${name}] play iniciado`, 'info');
             if (videoEl === this.activeVideo) {
                 this.setPlayState(true);
                 this.hideBuffering();
 
-                // Iniciar precarga del segundo segmento cuando el primero empiece a sonar
+                // Precarga inteligente en segundo plano
                 if (!this.standbyLoaded && this.segments.length > 1) {
                     this.standbyVideo.src = this.segments[1].file;
                     this.standbyVideo.load();
                     this.standbyLoaded = true;
+                    this.logDebug(`[Standby] Precargando segmento 1`, 'info');
                 }
             }
         });
 
+        videoEl.addEventListener('playing', () => {
+            this.logDebug(`[${name}] playing (reproduciendo fluido)`, 'success');
+            if (videoEl === this.activeVideo) {
+                this.hideBuffering();
+            }
+        });
+
         videoEl.addEventListener('pause', () => {
+            this.logDebug(`[${name}] pause`, 'info');
             if (videoEl === this.activeVideo && !this.isTransitioning) {
                 this.setPlayState(false);
             }
         });
 
         videoEl.addEventListener('waiting', () => {
+            this.logDebug(`[${name}] waiting (esperando buffer de red)`, 'warn');
             if (videoEl === this.activeVideo && this.isPlaying) {
                 this.showBuffering('Cargando 4K...');
-            }
-        });
-
-        videoEl.addEventListener('playing', () => {
-            if (videoEl === this.activeVideo) {
-                this.hideBuffering();
             }
         });
 
@@ -300,12 +336,32 @@ class DomeViewer {
         });
 
         videoEl.addEventListener('error', (e) => {
-            console.warn(`Video ${id} error:`, e);
+            const errCode = videoEl.error ? videoEl.error.code : 'Desconocido';
+            const errMsg = videoEl.error ? videoEl.error.message : '';
+            this.logDebug(`[${name}] ERROR (código: ${errCode}) ${errMsg}`, 'error');
             if (videoEl === this.activeVideo) {
                 this.hideBuffering();
-                this.showToast('Error cargando el segmento de video. Reintentando...', 4000);
+                this.showToast(`Error al cargar segmento (Código ${errCode}).`, 5000);
             }
         });
+    }
+
+    logDebug(message, type = 'info') {
+        const time = new Date().toTimeString().split(' ')[0];
+        const entry = { time, message, type };
+        this.debugLogs.push(entry);
+        if (this.debugLogs.length > 50) this.debugLogs.shift();
+
+        const logContainer = document.getElementById('debug-log');
+        if (logContainer) {
+            const item = document.createElement('div');
+            item.className = `debug-log-item ${type}`;
+            item.textContent = `[${time}] ${message}`;
+            logContainer.appendChild(item);
+            logContainer.scrollTop = logContainer.scrollHeight;
+        }
+
+        console.log(`[Visor360 ${type.toUpperCase()}] ${message}`);
     }
 
     showBuffering(text = 'Cargando 4K...') {
@@ -328,7 +384,7 @@ class DomeViewer {
         const globalTime = seg.start + this.activeVideo.currentTime;
         this.updateTimelineWithTime(globalTime);
 
-        // Precargar siguiente segmento en standby si aún no se hizo
+        // Precargar siguiente segmento en standby si aún no se cargó
         const nextIndex = (this.currentSegmentIndex + 1) % this.segments.length;
         if (!this.standbyVideo.src || this.standbyVideo.src.indexOf(this.segments[nextIndex].file) === -1) {
             this.standbyVideo.src = this.segments[nextIndex].file;
@@ -350,6 +406,7 @@ class DomeViewer {
 
         const nextIndex = (this.currentSegmentIndex + 1) % this.segments.length;
         this.isTransitioning = true;
+        this.logDebug(`Transición a Segmento #${nextIndex} (${this.segments[nextIndex].file})`, 'info');
 
         const nextActive = this.standbyVideo;
         const nextStandby = this.activeVideo;
@@ -369,14 +426,16 @@ class DomeViewer {
         if (this.isPlaying) {
             const playProm = this.activeVideo.play();
             if (playProm !== undefined) {
-                playProm.catch(e => console.warn("Next segment play error:", e));
+                playProm.catch(e => this.logDebug(`Play transition catch: ${e.message}`, 'warn'));
             }
         }
 
-        // Precargar subsiguiente
+        // Precargar subsiguiente en standby
         const futureIndex = (nextIndex + 1) % this.segments.length;
         this.standbyVideo.src = this.segments[futureIndex].file;
         this.standbyVideo.load();
+
+        if (this.pipActive) this.updatePipPreview();
 
         setTimeout(() => {
             this.isTransitioning = false;
@@ -407,12 +466,14 @@ class DomeViewer {
         const offsetInSegment = targetTime - targetSeg.start;
 
         this.showBuffering('Saltando...');
+        this.logDebug(`Buscando ${targetTime.toFixed(1)}s -> Segmento #${targetIndex} (offset: ${offsetInSegment.toFixed(1)}s)`, 'info');
+
         this.currentSegmentIndex = targetIndex;
         this.activeVideo.src = targetSeg.file;
         this.activeVideo.currentTime = offsetInSegment;
 
         if (this.isPlaying) {
-            this.activeVideo.play().catch(e => console.warn("Seek play error:", e));
+            this.activeVideo.play().catch(e => this.logDebug(`Seek play catch: ${e.message}`, 'warn'));
         }
 
         const nextIndex = (targetIndex + 1) % this.segments.length;
@@ -420,6 +481,156 @@ class DomeViewer {
         this.standbyVideo.load();
 
         this.updateTimelineWithTime(targetTime);
+    }
+
+    /* --------------------------------------------------------------------------
+       PANEL DE DIAGNÓSTICO Y DEBUG
+       -------------------------------------------------------------------------- */
+    initDebug() {
+        const toggleBtn = document.getElementById('btn-debug-toggle');
+        const closeBtn = document.getElementById('btn-close-debug');
+        if (toggleBtn) {
+            toggleBtn.addEventListener('click', () => {
+                this.debugPanel.classList.toggle('hidden');
+                if (!this.debugPanel.classList.contains('hidden')) {
+                    this.showToast('Panel de Diagnóstico abierto');
+                }
+            });
+        }
+        if (closeBtn) {
+            closeBtn.addEventListener('click', () => {
+                this.debugPanel.classList.add('hidden');
+            });
+        }
+
+        // Botones de acción debug
+        const dbgPlay = document.getElementById('dbg-btn-play');
+        if (dbgPlay) {
+            dbgPlay.addEventListener('click', () => {
+                this.logDebug('Forzando play desde panel de debug', 'info');
+                this.playVideo();
+            });
+        }
+
+        const dbgNext = document.getElementById('dbg-btn-next');
+        if (dbgNext) {
+            dbgNext.addEventListener('click', () => {
+                this.logDebug('Saltando manualmente al siguiente segmento', 'info');
+                this.transitionToNextSegment();
+            });
+        }
+
+        const dbgPip = document.getElementById('dbg-btn-pip');
+        if (dbgPip) {
+            dbgPip.addEventListener('click', () => {
+                this.pipActive = !this.pipActive;
+                const container = document.getElementById('debug-pip-container');
+                if (container) container.classList.toggle('hidden', !this.pipActive);
+                this.updatePipPreview();
+                this.logDebug(`Mini preview de video: ${this.pipActive ? 'ACTIVADO' : 'DESACTIVADO'}`, 'info');
+            });
+        }
+
+        const dbgCopy = document.getElementById('dbg-btn-copy');
+        if (dbgCopy) {
+            dbgCopy.addEventListener('click', () => {
+                const report = this.generateDiagnosticReport();
+                navigator.clipboard.writeText(report).then(() => {
+                    this.showToast('Informe copiado al portapapeles');
+                }).catch(() => {
+                    this.showToast('No se pudo copiar el informe');
+                });
+            });
+        }
+    }
+
+    updatePipPreview() {
+        const view = document.getElementById('debug-pip-view');
+        if (!view) return;
+        view.innerHTML = '';
+        if (this.pipActive && this.activeVideo) {
+            const clone = document.createElement('video');
+            clone.src = this.activeVideo.src;
+            clone.currentTime = this.activeVideo.currentTime;
+            clone.muted = true;
+            clone.autoplay = this.isPlaying;
+            clone.playsInline = true;
+            clone.controls = true;
+            clone.style.width = '100%';
+            clone.style.height = '100%';
+            clone.style.objectFit = 'contain';
+            view.appendChild(clone);
+        }
+    }
+
+    generateDiagnosticReport() {
+        const seg = this.segments[this.currentSegmentIndex] || {};
+        return `=== INFORME DE DIAGNÓSTICO VISOR 360 ===
+Fecha: ${new Date().toISOString()}
+Navegador: ${navigator.userAgent}
+URL: ${window.location.href}
+FPS: ${this.currentFps}
+Buffer Activo: ${this.activeVideo === this.videoA ? 'Video A' : 'Video B'}
+Active readyState: ${this.activeVideo ? READY_STATE_MAP[this.activeVideo.readyState] : 'null'}
+Active currentTime: ${this.activeVideo ? this.activeVideo.currentTime.toFixed(2) : 0}s
+Active videoWidth x Height: ${this.activeVideo ? `${this.activeVideo.videoWidth}x${this.activeVideo.videoHeight}` : 'N/A'}
+Active src: ${this.activeVideo ? this.activeVideo.src : 'N/A'}
+Segmento Actual: #${this.currentSegmentIndex} (${seg.file || 'N/A'})
+Duración Total: ${this.totalDuration.toFixed(2)}s
+Three.js Texture: ${this.activeTexture ? 'Activa' : 'Inactiva'}
+Shader Mode: ${this.config.projectionMode === 0 ? 'Fisheye' : 'Equirectangular'}
+WebGL Renderer: ${this.renderer ? this.renderer.capabilities.isWebGL2 ? 'WebGL 2' : 'WebGL 1' : 'N/A'}
+
+--- Últimos Eventos ---
+${this.debugLogs.map(l => `[${l.time}] [${l.type}] ${l.message}`).join('\n')}
+=========================================`;
+    }
+
+    updateDebugPanel() {
+        if (!this.debugPanel || this.debugPanel.classList.contains('hidden')) return;
+
+        const isA = this.activeVideo === this.videoA;
+        const elActive = document.getElementById('dbg-active-buffer');
+        if (elActive) elActive.textContent = isA ? 'Video A' : 'Video B';
+
+        const elReady = document.getElementById('dbg-ready-state');
+        if (elReady && this.activeVideo) {
+            elReady.textContent = READY_STATE_MAP[this.activeVideo.readyState] || `${this.activeVideo.readyState}`;
+        }
+
+        const elSeg = document.getElementById('dbg-segment');
+        if (elSeg) {
+            elSeg.textContent = `#${this.currentSegmentIndex + 1} / ${this.segments.length} (${this.segments[this.currentSegmentIndex]?.file.split('/').pop()})`;
+        }
+
+        const elRes = document.getElementById('dbg-resolution');
+        if (elRes && this.activeVideo) {
+            elRes.textContent = `${this.activeVideo.videoWidth || 0}x${this.activeVideo.videoHeight || 0} px`;
+        }
+
+        const elTime = document.getElementById('dbg-time');
+        if (elTime && this.activeVideo) {
+            const seg = this.segments[this.currentSegmentIndex];
+            const gTime = seg ? seg.start + this.activeVideo.currentTime : this.activeVideo.currentTime;
+            elTime.textContent = `${this.activeVideo.currentTime.toFixed(1)}s / ${gTime.toFixed(1)}s (${this.totalDuration.toFixed(1)}s)`;
+        }
+
+        const elTex = document.getElementById('dbg-texture');
+        if (elTex) {
+            elTex.textContent = `${this.currentFps} FPS (Texture OK)`;
+        }
+
+        const elBuf = document.getElementById('dbg-buffered');
+        if (elBuf && this.activeVideo && this.activeVideo.buffered.length > 0) {
+            const bufEnd = this.activeVideo.buffered.end(this.activeVideo.buffered.length - 1);
+            elBuf.textContent = `${bufEnd.toFixed(1)}s buffer`;
+        }
+
+        const elStby = document.getElementById('dbg-standby');
+        if (elStby && this.standbyVideo) {
+            const nextIdx = (this.currentSegmentIndex + 1) % this.segments.length;
+            elStby.textContent = `Seg #${nextIdx + 1} (${READY_STATE_MAP[this.standbyVideo.readyState] || '0'})`;
+        }
     }
 
     /* --------------------------------------------------------------------------
@@ -501,6 +712,8 @@ class DomeViewer {
             this.toggleFullscreen();
         } else if (e.code === 'KeyM') {
             this.toggleMute();
+        } else if (e.code === 'KeyD') {
+            if (this.debugPanel) this.debugPanel.classList.toggle('hidden');
         } else if (e.code === 'KeyH') {
             this.uiLayer.classList.toggle('ui-hidden');
         } else if (e.code === 'KeyR') {
@@ -800,9 +1013,9 @@ class DomeViewer {
             playPromise.then(() => {
                 this.setPlayState(true);
                 this.hideBuffering();
+                this.logDebug('playPromise resuelto con éxito', 'success');
             }).catch(err => {
-                console.warn('Autoplay con audio prevenido:', err);
-                // Si el navegador bloqueó audio, reintentar silenciado
+                this.logDebug(`Autoplay prevenido por navegador: ${err.message}`, 'warn');
                 this.activeVideo.muted = true;
                 this.videoA.muted = true;
                 this.videoB.muted = true;
@@ -812,7 +1025,7 @@ class DomeViewer {
                     this.updateVolumeIcons();
                     this.showToast('Reproduciendo en silencio. Clic en altavoz para sonido.', 4000);
                 }).catch(e => {
-                    console.error('Error al reproducir:', e);
+                    this.logDebug(`Error crítico en play: ${e.message}`, 'error');
                     this.setPlayState(false);
                     this.hideBuffering();
                 });
@@ -849,6 +1062,7 @@ class DomeViewer {
         this.videoA.muted = isMuted;
         this.videoB.muted = isMuted;
         this.updateVolumeIcons();
+        this.logDebug(`Audio: ${isMuted ? 'SILENCIADO' : 'ACTIVADO'}`, 'info');
     }
 
     updateVolumeIcons() {
@@ -925,6 +1139,7 @@ class DomeViewer {
         const badge = document.getElementById('file-name-badge');
         if (badge) badge.textContent = file.name;
         this.showToast(`Cargado archivo local: ${file.name}`);
+        this.logDebug(`Archivo local cargado: ${file.name}`, 'success');
     }
 
     setPresetView(preset) {
@@ -974,7 +1189,7 @@ class DomeViewer {
         if (this.uiLayer) this.uiLayer.classList.remove('ui-hidden');
         clearTimeout(this.uiTimeout);
         this.uiTimeout = setTimeout(() => {
-            if (!this.settingsDrawer.classList.contains('open') && this.isPlaying) {
+            if (!this.settingsDrawer.classList.contains('open') && (!this.debugPanel || this.debugPanel.classList.contains('hidden')) && this.isPlaying) {
                 if (this.uiLayer) this.uiLayer.classList.add('ui-hidden');
             }
         }, 4000);
@@ -1005,6 +1220,16 @@ class DomeViewer {
        -------------------------------------------------------------------------- */
     animate() {
         requestAnimationFrame(() => this.animate());
+
+        // Medir FPS
+        this.frameCount++;
+        const now = performance.now();
+        if (now - this.lastFpsUpdate >= 500) {
+            this.currentFps = Math.round((this.frameCount * 1000) / (now - this.lastFpsUpdate));
+            this.frameCount = 0;
+            this.lastFpsUpdate = now;
+            this.updateDebugPanel();
+        }
 
         // 1. Forzar actualización continua de textura de video en WebGL
         if (this.activeTexture) {

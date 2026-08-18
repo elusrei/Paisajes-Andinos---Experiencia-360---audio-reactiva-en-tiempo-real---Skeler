@@ -93,6 +93,13 @@
                     </svg>
                 </button>
 
+                <!-- Consola de Diagnóstico / Debug -->
+                <button class="btn-icon" id="btn-debug-toggle" title="Abrir Panel de Debug y Diagnóstico en Pantalla (D)">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M4 17l6-6-6-6m8 14h8"/>
+                    </svg>
+                </button>
+
                 <!-- Pantalla Completa -->
                 <button class="btn-icon" id="btn-fullscreen" title="Pantalla Completa (F)">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -179,6 +186,69 @@
             </div>
         </footer>
 
+    </div>
+
+    <!-- PANEL DE DIAGNÓSTICO Y DEBUG EN PANTALLA -->
+    <div class="debug-panel glass-panel interactive hidden" id="debug-panel">
+        <div class="debug-header">
+            <h4>
+                <span class="status-dot green"></span>
+                <span>DIAGNÓSTICO EN VIVO (4K STREAM)</span>
+            </h4>
+            <button class="btn-icon-sm" id="btn-close-debug">✕</button>
+        </div>
+        <div class="debug-grid">
+            <div class="debug-stat">
+                <span class="lbl">Buffer Activo:</span>
+                <span class="val" id="dbg-active-buffer">Video A</span>
+            </div>
+            <div class="debug-stat">
+                <span class="lbl">ReadyState:</span>
+                <span class="val" id="dbg-ready-state">0 (HAVE_NOTHING)</span>
+            </div>
+            <div class="debug-stat">
+                <span class="lbl">Segmento:</span>
+                <span class="val" id="dbg-segment">0 / 8</span>
+            </div>
+            <div class="debug-stat">
+                <span class="lbl">Resolución:</span>
+                <span class="val" id="dbg-resolution">0x0 px</span>
+            </div>
+            <div class="debug-stat">
+                <span class="lbl">Tiempo Video / Total:</span>
+                <span class="val" id="dbg-time">0.0s / 0.0s</span>
+            </div>
+            <div class="debug-stat">
+                <span class="lbl">Textura WebGL:</span>
+                <span class="val" id="dbg-texture">needsUpdate: true</span>
+            </div>
+            <div class="debug-stat">
+                <span class="lbl">Buffer en Red:</span>
+                <span class="val" id="dbg-buffered">0.0s</span>
+            </div>
+            <div class="debug-stat">
+                <span class="lbl">Standby Preload:</span>
+                <span class="val" id="dbg-standby">Pendiente</span>
+            </div>
+        </div>
+
+        <div class="debug-actions">
+            <button class="btn-debug-act" id="dbg-btn-play">▶ Forzar Play</button>
+            <button class="btn-debug-act" id="dbg-btn-next">⏭ Siguiente Seg</button>
+            <button class="btn-debug-act" id="dbg-btn-pip">👁 Mini Preview Video</button>
+            <button class="btn-debug-act" id="dbg-btn-copy">📋 Copiar Reporte</button>
+        </div>
+
+        <!-- Mini Preview de Video Nativo -->
+        <div class="debug-pip-container hidden" id="debug-pip-container">
+            <div class="debug-pip-label">Previsualización Directa de Video (DOM Nativo):</div>
+            <div class="debug-pip-view" id="debug-pip-view"></div>
+        </div>
+
+        <div class="debug-log-container">
+            <div class="debug-log-title">Registro de Eventos en Tiempo Real:</div>
+            <div class="debug-log" id="debug-log"></div>
+        </div>
     </div>
 
     <!-- PANEL LATERAL DE CALIBRACIÓN DEL DOMO -->
