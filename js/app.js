@@ -116,6 +116,12 @@ class DomeViewer {
         this.animate();
 
         this.logDebug('Visor 360 inicializado correctamente', 'success');
+
+        if (window.location.protocol === 'file:') {
+            setTimeout(() => {
+                this.showToast('Estás en modo file:///. Para reproducir en tu PC, ejecutá iniciar_servidor_local.cmd (o abrilo en GitHub Pages).', 8000);
+            }, 500);
+        }
     }
 
     /* --------------------------------------------------------------------------
@@ -144,6 +150,11 @@ class DomeViewer {
         this.container.appendChild(this.renderer.domElement);
 
         // 4. Texturas para Doble Búfer (Video A y Video B)
+        if (window.location.protocol.startsWith('http')) {
+            this.videoA.crossOrigin = 'anonymous';
+            this.videoB.crossOrigin = 'anonymous';
+        }
+
         this.textureA = new THREE.VideoTexture(this.videoA);
         this.textureA.minFilter = THREE.LinearFilter;
         this.textureA.magFilter = THREE.LinearFilter;
