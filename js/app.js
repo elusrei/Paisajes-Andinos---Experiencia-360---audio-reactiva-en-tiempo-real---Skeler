@@ -1,7 +1,7 @@
 /**
  * ==========================================================================
- * DOME 360° MASTER VIEWER - CONTROLADOR PRINCIPAL THREE.JS & REPRODUCTOR
- * CON SOPORTE PARA SEGMENTACIÓN 4K CONTINUA, DUAL BUFFERING, GIROSCOPIO Y MOBILE
+ * DOME 360° MASTER VIEWER - CONTROLADOR THREE.JS & REPRODUCTOR ADAPTATIVO
+ * CON SENSORES DE GIROSCOPIO RELATIVO, STREAM DUAL 2K/4K Y HUD TOUCH MOBILE
  * ==========================================================================
  */
 
@@ -14,6 +14,17 @@ const DEFAULT_SEGMENTS = [
     { file: "segments/segment_05.mp4", start: 143.223, duration: 28.867, end: 172.090 },
     { file: "segments/segment_06.mp4", start: 172.090, duration: 24.033, end: 196.123 },
     { file: "segments/segment_07.mp4", start: 196.123, duration: 22.133, end: 218.257 }
+];
+
+const DEFAULT_SEGMENTS_MOBILE = [
+    { file: "segments_mobile/segment_00.mp4", start: 0.0, duration: 33.357, end: 33.357 },
+    { file: "segments_mobile/segment_01.mp4", start: 33.357, duration: 28.700, end: 62.057 },
+    { file: "segments_mobile/segment_02.mp4", start: 62.057, duration: 22.667, end: 84.723 },
+    { file: "segments_mobile/segment_03.mp4", start: 84.723, duration: 29.100, end: 113.823 },
+    { file: "segments_mobile/segment_04.mp4", start: 113.823, duration: 29.400, end: 143.223 },
+    { file: "segments_mobile/segment_05.mp4", start: 143.223, duration: 28.867, end: 172.090 },
+    { file: "segments_mobile/segment_06.mp4", start: 172.090, duration: 24.033, end: 196.123 },
+    { file: "segments_mobile/segment_07.mp4", start: 196.123, duration: 22.133, end: 218.257 }
 ];
 
 const READY_STATE_MAP = [
@@ -58,7 +69,7 @@ class DomeViewer {
 
         // Estado del Motor de Segmentos (Doble Búfer Ping-Pong)
         this.isSegmentedMode = true;
-        this.segments = [...DEFAULT_SEGMENTS];
+        this.segments = this.isMobile ? [...DEFAULT_SEGMENTS_MOBILE] : [...DEFAULT_SEGMENTS];
         this.currentSegmentIndex = 0;
         this.activeVideo = this.videoA;
         this.standbyVideo = this.videoB;
@@ -66,7 +77,7 @@ class DomeViewer {
         this.isTransitioning = false;
         this.engineInitialized = false;
 
-        // Posición Inicial Solicitada
+        // Posición Inicial
         this.defaultYaw = 45;
         this.defaultPitch = 50;
         this.defaultFov = 95;
@@ -79,18 +90,19 @@ class DomeViewer {
         this.targetFov = this.defaultFov;
 
         this.isDragging = false;
+        this.touchMoved = false;
         this.previousMousePosition = { x: 0, y: 0 };
         this.touchStartDist = 0;
         this.damping = 0.08;
 
         // Giroscopio / Sensor de Movimiento
         this.gyroActive = false;
-        this.gyroBaseAlpha = null;
+        this.gyroSensor = null;
+        this.gyroInitialOrientation = null;
+        this.gyroStartCamera = null;
 
-        // Teclado
+        // Teclado & Mouse
         this.keys = {};
-
-        // Inactividad de Mouse
         this.mouseTimeout = null;
 
         // Estado de Reproducción
@@ -120,7 +132,7 @@ class DomeViewer {
         this.currentFps = 60;
         this.pipActive = false;
 
-        // 1. Inicializar Three.js, UI, Mobile y Gatekeeper
+        // Inicializar componentes
         this.initThree();
         this.initEvents();
         this.initUI();
@@ -129,7 +141,7 @@ class DomeViewer {
         this.initMobileOrientationCheck();
         this.animate();
 
-        this.logDebug(`Visor 360 inicializado (Modo: ${this.isMobile ? 'Mobile Optimizado' : 'Escritorio'})`, 'success');
+        this.logDebug(`Visor 360 listo (${this.isMobile ? 'Stream Mobile 2K' : 'Stream Desktop 4K'})`, 'success');
     }
 
     /* --------------------------------------------------------------------------
@@ -142,12 +154,8 @@ class DomeViewer {
         const btnDataContinue = document.getElementById('btn-data-continue');
         if (btnDataContinue) {
             btnDataContinue.addEventListener('click', () => {
-                if (this.dataWarningModal) {
-                    this.dataWarningModal.classList.add('hidden');
-                }
-                if (this.splashScreen) {
-                    this.splashScreen.classList.remove('hidden');
-                }
+                if (this.dataWarningModal) this.dataWarningModal.classList.add('hidden');
+                if (this.splashScreen) this.splashScreen.classList.remove('hidden');
                 this.loadManifestOnly();
             });
         }
@@ -167,7 +175,7 @@ class DomeViewer {
         this.manifestLoaded = true;
 
         const manifestUrl = this.isMobile ? 'segments_mobile/manifest.json' : 'segments/manifest.json';
-        this.logDebug(`Seleccionado stream: ${this.isMobile ? 'Mobile 2K (Alta Fluidez)' : 'Desktop 4K Master'}`, 'info');
+        this.logDebug(`Cargando stream: ${this.isMobile ? 'Mobile 2K' : 'Desktop 4K'}`, 'info');
 
         fetch(manifestUrl)
             .then(res => res.json())
@@ -179,16 +187,16 @@ class DomeViewer {
                     }));
                     this.totalDuration = this.segments[this.segments.length - 1].end;
                     this.updateTotalDuration();
-                    this.logDebug(`Manifest cargado: ${this.segments.length} segmentos (${this.isMobile ? '2K' : '4K'})`, 'info');
+                    this.logDebug(`Manifest listo: ${this.segments.length} segmentos`, 'info');
                 }
             })
             .catch(() => {
-                this.logDebug(`Uso de manifest por defecto (${this.segments.length} segmentos)`, 'info');
+                this.logDebug(`Uso de manifest local por defecto`, 'info');
             });
     }
 
     /* --------------------------------------------------------------------------
-       INICIALIZACIÓN THREE.JS (OPTIMIZADA PARA MOBILE & GPU)
+       INICIALIZACIÓN THREE.JS (OPTIMIZADA)
        -------------------------------------------------------------------------- */
     initThree() {
         this.scene = new THREE.Scene();
@@ -205,7 +213,6 @@ class DomeViewer {
         });
         this.renderer.setSize(window.innerWidth, window.innerHeight);
 
-        // Optimización GPU Móvil: no sobrecargar con pixelRatio 3x/4x
         const maxDpr = this.isMobile ? 1.25 : 2.0;
         this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, maxDpr));
         this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -259,7 +266,6 @@ class DomeViewer {
             depthTest: false
         });
 
-        // Geometría adaptativa (menos segmentos en mobile para fluidez total)
         const segmentsCount = this.isMobile ? 48 : 96;
         const domeGeometry = new THREE.SphereGeometry(600, segmentsCount, segmentsCount);
         this.domeMesh = new THREE.Mesh(domeGeometry, this.domeMaterial);
@@ -298,56 +304,106 @@ class DomeViewer {
     }
 
     /* --------------------------------------------------------------------------
-       GIROSCOPIO / SENSOR DE MOVIMIENTO (DEVICE ORIENTATION)
+       GIROSCOPIO / SENSOR DE MOVIMIENTO MULTI-API (ANDROID & IOS)
        -------------------------------------------------------------------------- */
     toggleGyro() {
         if (this.gyroActive) {
-            this.gyroActive = false;
-            window.removeEventListener('deviceorientationabsolute', this.handleDeviceOrientation);
-            window.removeEventListener('deviceorientation', this.handleDeviceOrientation);
-            const btnGyro = document.getElementById('btn-gyro');
-            if (btnGyro) btnGyro.classList.remove('active');
-            const dbgGyro = document.getElementById('dbg-gyro');
-            if (dbgGyro) dbgGyro.textContent = 'Inactivo';
+            this.stopGyro();
             this.showToast('Giroscopio desactivado');
             return;
         }
 
-        // Permiso en iOS 13+
+        this.gyroInitialOrientation = null;
+        this.gyroStartCamera = null;
+
+        // 1. Intentar permiso en iOS 13+
         if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
             DeviceOrientationEvent.requestPermission()
                 .then(state => {
                     if (state === 'granted') {
-                        this.startGyroListener();
+                        this.startDeviceOrientationFallback();
                     } else {
-                        this.showToast('Permiso de giroscopio denegado');
+                        this.showToast('Permiso de giroscopio no concedido');
                     }
                 })
-                .catch(() => {
-                    this.showToast('Error accediendo a giroscopio');
+                .catch(() => this.showToast('Error accediendo a giroscopio'));
+        } 
+        // 2. Intentar Generic Sensor API en Android (Chrome/Brave)
+        else if ('AbsoluteOrientationSensor' in window || 'RelativeOrientationSensor' in window) {
+            try {
+                const SensorClass = window.RelativeOrientationSensor || window.AbsoluteOrientationSensor;
+                this.gyroSensor = new SensorClass({ frequency: 60 });
+                this.gyroSensor.addEventListener('reading', () => this.onSensorReading());
+                this.gyroSensor.addEventListener('error', () => {
+                    this.gyroSensor.stop();
+                    this.gyroSensor = null;
+                    this.startDeviceOrientationFallback();
                 });
-        } else if ('DeviceOrientationEvent' in window || 'ondeviceorientationabsolute' in window) {
-            this.startGyroListener();
-        } else {
-            this.showToast('Sensor de movimiento no disponible en este dispositivo');
+                this.gyroSensor.start();
+                this.onGyroStarted('Giroscopio (Sensor API 60Hz)');
+            } catch (err) {
+                this.startDeviceOrientationFallback();
+            }
+        } 
+        // 3. Fallback estándar DeviceOrientationEvent
+        else {
+            this.startDeviceOrientationFallback();
         }
     }
 
-    startGyroListener() {
-        this.gyroActive = true;
-        this.gyroBaseAlpha = null;
+    startDeviceOrientationFallback() {
         this.handleDeviceOrientation = (e) => this.onDeviceOrientation(e);
-
         window.addEventListener('deviceorientationabsolute', this.handleDeviceOrientation);
         window.addEventListener('deviceorientation', this.handleDeviceOrientation);
+        this.onGyroStarted('Giroscopio activado 📱');
+    }
 
+    onGyroStarted(label) {
+        this.gyroActive = true;
         const btnGyro = document.getElementById('btn-gyro');
         if (btnGyro) btnGyro.classList.add('active');
-
         const dbgGyro = document.getElementById('dbg-gyro');
         if (dbgGyro) dbgGyro.textContent = 'Activo';
+        this.showToast(`${label}: Movete con tu teléfono`, 3500);
+    }
 
-        this.showToast('Giroscopio activado: Movete con tu teléfono 📱', 4000);
+    stopGyro() {
+        this.gyroActive = false;
+        if (this.gyroSensor) {
+            try { this.gyroSensor.stop(); } catch(e) {}
+            this.gyroSensor = null;
+        }
+        if (this.handleDeviceOrientation) {
+            window.removeEventListener('deviceorientationabsolute', this.handleDeviceOrientation);
+            window.removeEventListener('deviceorientation', this.handleDeviceOrientation);
+        }
+        const btnGyro = document.getElementById('btn-gyro');
+        if (btnGyro) btnGyro.classList.remove('active');
+        const dbgGyro = document.getElementById('dbg-gyro');
+        if (dbgGyro) dbgGyro.textContent = 'Inactivo';
+    }
+
+    onSensorReading() {
+        if (!this.gyroActive || !this.gyroSensor || !this.gyroSensor.quaternion) return;
+
+        // Convertir cuaternión a Euler (Yaw y Pitch)
+        const q = this.gyroSensor.quaternion;
+        const qObj = new THREE.Quaternion(q[0], q[1], q[2], q[3]);
+        const euler = new THREE.Euler().setFromQuaternion(qObj, 'YXZ');
+
+        const pitchDeg = THREE.MathUtils.radToDeg(euler.x);
+        const yawDeg = THREE.MathUtils.radToDeg(euler.y);
+
+        if (this.gyroInitialOrientation === null) {
+            this.gyroInitialOrientation = { pitch: pitchDeg, yaw: yawDeg };
+            this.gyroStartCamera = { pitch: this.pitch, yaw: this.yaw };
+        }
+
+        const deltaPitch = pitchDeg - this.gyroInitialOrientation.pitch;
+        const deltaYaw = yawDeg - this.gyroInitialOrientation.yaw;
+
+        this.targetPitch = Math.max(-89.9, Math.min(89.9, this.gyroStartCamera.pitch - deltaPitch));
+        this.targetYaw = this.gyroStartCamera.yaw - deltaYaw;
     }
 
     onDeviceOrientation(e) {
@@ -368,20 +424,24 @@ class DomeViewer {
             pitchVal = (e.gamma || 0);
             yawVal = (e.alpha || 0) - 90;
         } else {
-            pitchVal = (e.beta || 0) - 35; // Offset cómodo para sostener el celular
+            pitchVal = (e.beta || 0) - 45;
             yawVal = -(e.alpha || 0);
         }
 
-        if (this.gyroBaseAlpha === null) {
-            this.gyroBaseAlpha = yawVal - this.defaultYaw;
+        if (this.gyroInitialOrientation === null) {
+            this.gyroInitialOrientation = { pitch: pitchVal, yaw: yawVal };
+            this.gyroStartCamera = { pitch: this.pitch, yaw: this.yaw };
         }
 
-        this.targetPitch = Math.max(-89.9, Math.min(89.9, pitchVal));
-        this.targetYaw = yawVal - this.gyroBaseAlpha;
+        const deltaPitch = pitchVal - this.gyroInitialOrientation.pitch;
+        const deltaYaw = yawVal - this.gyroInitialOrientation.yaw;
+
+        this.targetPitch = Math.max(-89.9, Math.min(89.9, this.gyroStartCamera.pitch - deltaPitch));
+        this.targetYaw = this.gyroStartCamera.yaw + deltaYaw;
     }
 
     /* --------------------------------------------------------------------------
-       ENTRADA A LA EXPERIENCIA Y GAPLESS PING-PONG PLAYBACK
+       ENTRADA A LA EXPERIENCIA Y REPRODUCCIÓN CONTINUA
        -------------------------------------------------------------------------- */
     enterExperience() {
         if (this.splashScreen) {
@@ -391,7 +451,7 @@ class DomeViewer {
             }, 700);
         }
 
-        this.showBuffering('Iniciando 4K...');
+        this.showBuffering('Iniciando...');
         this.primeAndStartPlayback();
     }
 
@@ -421,7 +481,6 @@ class DomeViewer {
                 this.setPlayState(true);
                 this.hideBuffering();
 
-                // Precargar standby con timing optimizado
                 if (this.segments.length > 1) {
                     this.standbyVideo.src = this.segments[1].file;
                     this.standbyVideo.preload = "auto";
@@ -434,7 +493,7 @@ class DomeViewer {
                     this.setPlayState(true);
                     this.hideBuffering();
                     this.updateVolumeIcons();
-                    this.showToast('Audio silenciado por navegador. Tocá el volumen para activar.', 4000);
+                    this.showToast('Audio en silencio. Tocá el parlante para activar sonido.', 4000);
                 }).catch(() => {
                     this.setPlayState(false);
                     this.hideBuffering();
@@ -447,18 +506,25 @@ class DomeViewer {
         videoEl.addEventListener('loadedmetadata', () => {
             if (videoEl === this.activeVideo) {
                 this.updateTotalDuration();
+                this.hideBuffering();
             }
         });
 
         videoEl.addEventListener('loadeddata', () => {
-            if (videoEl === this.activeVideo && this.activeTexture) {
-                this.activeTexture.needsUpdate = true;
+            if (videoEl === this.activeVideo) {
+                if (this.activeTexture) this.activeTexture.needsUpdate = true;
+                this.hideBuffering();
             }
         });
 
         videoEl.addEventListener('timeupdate', () => {
-            if (videoEl === this.activeVideo && !this.isScrubbing) {
-                this.onActiveTimeUpdate();
+            if (videoEl === this.activeVideo) {
+                if (this.bufferingSpinner && !this.bufferingSpinner.classList.contains('hidden')) {
+                    this.hideBuffering();
+                }
+                if (!this.isScrubbing) {
+                    this.onActiveTimeUpdate();
+                }
             }
         });
 
@@ -475,14 +541,20 @@ class DomeViewer {
             }
         });
 
+        videoEl.addEventListener('playing', () => {
+            if (videoEl === this.activeVideo) {
+                this.hideBuffering();
+            }
+        });
+
         videoEl.addEventListener('waiting', () => {
             if (videoEl === this.activeVideo && this.isPlaying) {
-                this.showBuffering('Cargando 4K...');
+                this.showBuffering('Cargando...');
             }
         });
 
         videoEl.addEventListener('canplay', () => {
-            if (videoEl === this.activeVideo && this.isPlaying) {
+            if (videoEl === this.activeVideo) {
                 this.hideBuffering();
             }
         });
@@ -503,7 +575,7 @@ class DomeViewer {
             this.standbyVideo.load();
         }
 
-        // Transición anticipada continua para reproducción fluida
+        // Transición anticipada
         const remaining = seg.duration - this.activeVideo.currentTime;
         if (remaining <= 0.08 && remaining > 0 && !this.isTransitioning) {
             this.transitionToNextSegment();
@@ -518,7 +590,6 @@ class DomeViewer {
 
         const nextIndex = (this.currentSegmentIndex + 1) % this.segments.length;
         this.isTransitioning = true;
-        this.logDebug(`Conmutando a segmento #${nextIndex + 1} (${this.segments[nextIndex].file})`, 'info');
 
         const nextActive = this.standbyVideo;
         const nextStandby = this.activeVideo;
@@ -576,7 +647,7 @@ class DomeViewer {
         const targetSeg = this.segments[targetIndex];
         const offsetInSegment = targetTime - targetSeg.start;
 
-        this.showBuffering('Saltando...');
+        this.showBuffering('Buscando...');
         this.currentSegmentIndex = targetIndex;
         this.activeVideo.src = targetSeg.file;
         this.activeVideo.currentTime = offsetInSegment;
@@ -684,6 +755,7 @@ class DomeViewer {
                 this.targetYaw = this.defaultYaw;
                 this.targetPitch = this.defaultPitch;
                 this.targetFov = this.defaultFov;
+                this.gyroInitialOrientation = null;
                 this.showToast('Vista reorientada al origen');
             });
         }
@@ -770,6 +842,7 @@ class DomeViewer {
         this.videoA.muted = isMuted;
         this.videoB.muted = isMuted;
         this.updateVolumeIcons();
+        this.showToast(isMuted ? 'Sonido silenciado' : 'Sonido activado');
     }
 
     updateVolumeIcons() {
@@ -845,7 +918,7 @@ class DomeViewer {
         }
     }
 
-    showBuffering(text = 'Cargando 4K...') {
+    showBuffering(text = 'Cargando...') {
         if (this.bufferingSpinner) {
             if (this.bufferingText) this.bufferingText.textContent = text;
             this.bufferingSpinner.classList.remove('hidden');
@@ -954,76 +1027,41 @@ Tiempo: ${this.activeVideo ? this.activeVideo.currentTime.toFixed(2) : 0}s / ${t
 Segmento: #${this.currentSegmentIndex + 1} (${seg.file || 'N/A'}`;
     }
 
-    updateDebugPanel() {
-        if (!this.debugPanel || this.debugPanel.classList.contains('hidden')) return;
-
-        const isA = this.activeVideo === this.videoA;
-        const elActive = document.getElementById('dbg-active-buffer');
-        if (elActive) elActive.textContent = isA ? 'Video A' : 'Video B';
-
-        const elReady = document.getElementById('dbg-ready-state');
-        if (elReady && this.activeVideo) {
-            elReady.textContent = READY_STATE_MAP[this.activeVideo.readyState] || `${this.activeVideo.readyState}`;
-        }
-
-        const elSeg = document.getElementById('dbg-segment');
-        if (elSeg) {
-            elSeg.textContent = `#${this.currentSegmentIndex + 1} / ${this.segments.length}`;
-        }
-
-        const elRes = document.getElementById('dbg-resolution');
-        if (elRes && this.activeVideo) {
-            elRes.textContent = `${this.activeVideo.videoWidth || 0}x${this.activeVideo.videoHeight || 0} px`;
-        }
-
-        const elTime = document.getElementById('dbg-time');
-        if (elTime && this.activeVideo) {
-            const seg = this.segments[this.currentSegmentIndex];
-            const gTime = seg ? seg.start + this.activeVideo.currentTime : this.activeVideo.currentTime;
-            elTime.textContent = `${this.activeVideo.currentTime.toFixed(1)}s / ${gTime.toFixed(1)}s`;
-        }
-
-        const elTex = document.getElementById('dbg-texture');
-        if (elTex) elTex.textContent = `${this.currentFps} FPS`;
-
-        const elBuf = document.getElementById('dbg-buffered');
-        if (elBuf && this.activeVideo && this.activeVideo.buffered.length > 0) {
-            const bufEnd = this.activeVideo.buffered.end(this.activeVideo.buffered.length - 1);
-            elBuf.textContent = `${bufEnd.toFixed(1)}s`;
-        }
-    }
-
     /* --------------------------------------------------------------------------
-       EVENTOS DE NAVEGACIÓN, RATÓN Y TOQUES (NATURAL DIRECTO)
+       EVENTOS DE NAVEGACIÓN TOUCH & MOUSE (ADAPTATIVOS)
        -------------------------------------------------------------------------- */
     initEvents() {
         window.addEventListener('resize', () => this.onWindowResize());
 
-        // Manejo de movimiento de mouse para presencia sutil
         const triggerMouseActive = () => {
             if (this.uiLayer) {
                 this.uiLayer.classList.add('mouse-active');
                 clearTimeout(this.mouseTimeout);
                 this.mouseTimeout = setTimeout(() => {
                     this.uiLayer.classList.remove('mouse-active');
-                }, 2800);
+                }, 3000);
             }
         };
 
         window.addEventListener('mousemove', triggerMouseActive);
-        window.addEventListener('touchstart', triggerMouseActive, { passive: true });
 
-        // Eventos de ratón
+        // Tap simple en pantalla en mobile para mostrar/ocultar barra
         this.container.addEventListener('pointerdown', (e) => this.onPointerDown(e));
-        window.addEventListener('pointermove', (e) => this.onPointerMove(e));
+        window.addEventListener('pointermove', (e) => {
+            this.onPointerMove(e);
+            triggerMouseActive();
+        });
         window.addEventListener('pointerup', () => this.onPointerUp());
 
         this.container.addEventListener('wheel', (e) => this.onWheel(e), { passive: false });
 
-        // Eventos táctiles (Pinch to Zoom & Touch Drag)
-        this.container.addEventListener('touchstart', (e) => this.onTouchStart(e), { passive: false });
+        // Eventos táctiles
+        this.container.addEventListener('touchstart', (e) => {
+            triggerMouseActive();
+            this.onTouchStart(e);
+        }, { passive: false });
         this.container.addEventListener('touchmove', (e) => this.onTouchMove(e), { passive: false });
-        this.container.addEventListener('touchend', () => this.onTouchEnd());
+        this.container.addEventListener('touchend', (e) => this.onTouchEnd(e));
 
         // Teclado
         window.addEventListener('keydown', (e) => this.onKeyDown(e));
@@ -1056,6 +1094,7 @@ Segmento: #${this.currentSegmentIndex + 1} (${seg.file || 'N/A'}`;
     }
 
     onTouchStart(e) {
+        this.touchMoved = false;
         if (e.touches.length === 1) {
             this.isDragging = true;
             this.previousMousePosition = { x: e.touches[0].clientX, y: e.touches[0].clientY };
@@ -1068,6 +1107,7 @@ Segmento: #${this.currentSegmentIndex + 1} (${seg.file || 'N/A'}`;
     }
 
     onTouchMove(e) {
+        this.touchMoved = true;
         if (this.gyroActive) return;
 
         if (e.touches.length === 1 && this.isDragging) {
@@ -1095,7 +1135,11 @@ Segmento: #${this.currentSegmentIndex + 1} (${seg.file || 'N/A'}`;
         }
     }
 
-    onTouchEnd() {
+    onTouchEnd(e) {
+        // Si fue un tap limpio (sin arrastre), alternar visibilidad de controles en mobile
+        if (!this.touchMoved && this.isMobile && e.target === this.renderer.domElement) {
+            this.uiLayer.classList.toggle('controls-locked');
+        }
         this.isDragging = false;
     }
 
@@ -1122,6 +1166,7 @@ Segmento: #${this.currentSegmentIndex + 1} (${seg.file || 'N/A'}`;
             this.targetYaw = this.defaultYaw;
             this.targetPitch = this.defaultPitch;
             this.targetFov = this.defaultFov;
+            this.gyroInitialOrientation = null;
         }
     }
 
@@ -1150,7 +1195,6 @@ Segmento: #${this.currentSegmentIndex + 1} (${seg.file || 'N/A'}`;
             this.currentFps = Math.round((this.frameCount * 1000) / (now - this.lastFpsUpdate));
             this.frameCount = 0;
             this.lastFpsUpdate = now;
-            this.updateDebugPanel();
         }
 
         // Actualizar textura de video en WebGL
