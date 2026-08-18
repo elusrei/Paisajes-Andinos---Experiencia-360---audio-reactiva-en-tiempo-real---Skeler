@@ -754,25 +754,28 @@ ${this.debugLogs.map(l => `[${l.time}] [${l.type}] ${l.message}`).join('\n')}
     /* --------------------------------------------------------------------------
        CONSTRUCCIÓN Y EVENTOS DE INTERFAZ (UI & CONTROLES)
        -------------------------------------------------------------------------- */
+    enterExperience() {
+        if (this.splashScreen) {
+            this.splashScreen.classList.add('hidden');
+            this.splashScreen.style.display = 'none';
+        }
+        this.showBuffering('Iniciando 4K...');
+        this.playVideo();
+    }
+
     initUI() {
         const btnStart = document.getElementById('btn-enter') || document.getElementById('btn-start-experience');
-        const handleStart = (e) => {
-            if (e) e.stopPropagation();
-            if (this.splashScreen) {
-                this.splashScreen.classList.add('hidden');
-            }
-            this.showBuffering('Iniciando 4K...');
-            this.playVideo();
-        };
-
         if (btnStart) {
-            btnStart.addEventListener('click', handleStart);
+            btnStart.addEventListener('click', (e) => {
+                if (e) e.stopPropagation();
+                this.enterExperience();
+            });
         }
 
         if (this.splashScreen) {
             this.splashScreen.addEventListener('click', (e) => {
                 if (e.target === this.splashScreen) {
-                    handleStart(e);
+                    this.enterExperience();
                 }
             });
         }

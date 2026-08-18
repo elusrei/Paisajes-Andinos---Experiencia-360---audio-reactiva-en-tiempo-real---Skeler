@@ -389,7 +389,7 @@
                 </div>
             </div>
 
-            <button class="btn-primary" id="btn-enter" style="width: 100%; justify-content: center; font-size: 1rem; padding: 0.9rem;">
+            <button class="btn-primary" id="btn-enter" onclick="if(window.app){window.app.enterExperience();}else{document.getElementById('splash-screen').style.display='none';}" style="width: 100%; justify-content: center; font-size: 1rem; padding: 0.9rem;">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><polygon points="6 3 20 12 6 21 6 3"/></svg>
                 <span>Entrar a la Experiencia</span>
             </button>
