@@ -124,16 +124,23 @@ class DomeViewer {
         this.renderer.toneMappingExposure = 1.0;
         this.container.appendChild(this.renderer.domElement);
 
-        // 4. Texturas para Doble Búfer (Video A y Video B)
+        // 4. Texturas para Doble Búfer (Video A y Video B con CORS para WebGL)
+        this.videoA.crossOrigin = 'anonymous';
+        this.videoB.crossOrigin = 'anonymous';
+
         this.textureA = new THREE.VideoTexture(this.videoA);
         this.textureA.minFilter = THREE.LinearFilter;
         this.textureA.magFilter = THREE.LinearFilter;
+        this.textureA.wrapS = THREE.ClampToEdgeWrapping;
+        this.textureA.wrapT = THREE.ClampToEdgeWrapping;
         this.textureA.format = THREE.RGBAFormat;
         this.textureA.generateMipmaps = false;
 
         this.textureB = new THREE.VideoTexture(this.videoB);
         this.textureB.minFilter = THREE.LinearFilter;
         this.textureB.magFilter = THREE.LinearFilter;
+        this.textureB.wrapS = THREE.ClampToEdgeWrapping;
+        this.textureB.wrapT = THREE.ClampToEdgeWrapping;
         this.textureB.format = THREE.RGBAFormat;
         this.textureB.generateMipmaps = false;
 
