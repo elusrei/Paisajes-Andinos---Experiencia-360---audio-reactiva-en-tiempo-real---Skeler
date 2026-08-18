@@ -1,14 +1,27 @@
 /**
  * ==========================================================================
  * DOME 360° MASTER VIEWER - CONTROLADOR PRINCIPAL THREE.JS & REPRODUCTOR
+ * CON SOPORTE PARA SEGMENTACIÓN 4K CONTINUA Y DOBLE BÚFER (PING-PONG)
  * ==========================================================================
  */
+
+const DEFAULT_SEGMENTS = [
+    { file: "segments/segment_00.mp4", start: 0.0, duration: 33.357, end: 33.357 },
+    { file: "segments/segment_01.mp4", start: 33.357, duration: 28.700, end: 62.057 },
+    { file: "segments/segment_02.mp4", start: 62.057, duration: 22.667, end: 84.723 },
+    { file: "segments/segment_03.mp4", start: 84.723, duration: 29.100, end: 113.823 },
+    { file: "segments/segment_04.mp4", start: 113.823, duration: 29.400, end: 143.223 },
+    { file: "segments/segment_05.mp4", start: 143.223, duration: 28.867, end: 172.090 },
+    { file: "segments/segment_06.mp4", start: 172.090, duration: 24.033, end: 196.123 },
+    { file: "segments/segment_07.mp4", start: 196.123, duration: 22.133, end: 218.257 }
+];
 
 class DomeViewer {
     constructor() {
         // Elementos DOM
         this.container = document.getElementById('canvas-container');
-        this.video = document.getElementById('dome-video');
+        this.videoA = document.getElementById('dome-video-a');
+        this.videoB = document.getElementById('dome-video-b');
         this.uiLayer = document.getElementById('ui-layer');
         this.fileInput = document.getElementById('file-input');
         this.splashScreen = document.getElementById('splash-screen');
@@ -22,8 +35,19 @@ class DomeViewer {
         this.renderer = null;
         this.domeMesh = null;
         this.domeMaterial = null;
-        this.videoTexture = null;
+        this.textureA = null;
+        this.textureB = null;
+        this.activeTexture = null;
         this.horizonGrid = null;
+
+        // Estado del Motor de Segmentos (Doble Búfer)
+        this.isSegmentedMode = true;
+        this.segments = [...DEFAULT_SEGMENTS];
+        this.currentSegmentIndex = 0;
+        this.activeVideo = this.videoA;
+        this.standbyVideo = this.videoB;
+        this.totalDuration = this.segments[this.segments.length - 1].end;
+        this.isTransitioning = false;
 
         // Estado de Navegación de Cámara
         this.isDragging = false;
@@ -66,7 +90,7 @@ class DomeViewer {
 
         // Inicialización
         this.initThree();
-        this.initVideo();
+        this.initSegmentEngine();
         this.initEvents();
         this.initUI();
         this.animate();
@@ -97,16 +121,23 @@ class DomeViewer {
         this.renderer.toneMappingExposure = 1.0;
         this.container.appendChild(this.renderer.domElement);
 
-        // 4. Textura de Video
-        this.videoTexture = new THREE.VideoTexture(this.video);
-        this.videoTexture.minFilter = THREE.LinearFilter;
-        this.videoTexture.magFilter = THREE.LinearFilter;
-        this.videoTexture.format = THREE.RGBAFormat;
+        // 4. Texturas para Doble Búfer (Video A y Video B)
+        this.textureA = new THREE.VideoTexture(this.videoA);
+        this.textureA.minFilter = THREE.LinearFilter;
+        this.textureA.magFilter = THREE.LinearFilter;
+        this.textureA.format = THREE.RGBAFormat;
+
+        this.textureB = new THREE.VideoTexture(this.videoB);
+        this.textureB.minFilter = THREE.LinearFilter;
+        this.textureB.magFilter = THREE.LinearFilter;
+        this.textureB.format = THREE.RGBAFormat;
+
+        this.activeTexture = this.textureA;
 
         // 5. Material con Shader Fulldome
         const uniforms = THREE.UniformsUtils.clone(DomeShader.uniforms);
-        uniforms.tVideo.value = this.videoTexture;
-        uniforms.uAspect.value = 16 / 9;
+        uniforms.tVideo.value = this.activeTexture;
+        uniforms.uAspect.value = 1.0;
         uniforms.uDomeFov.value = (this.config.domeFov * Math.PI) / 180;
         uniforms.uScale.value = this.config.scale;
         uniforms.uOffsetX.value = this.config.offsetX;
@@ -138,7 +169,7 @@ class DomeViewer {
         const horizonGroup = new THREE.Group();
 
         // Anillo de horizonte
-        const ringGeo = new THREE.RingGeometry(595, 600, 96);
+        const ringGeo = new THREE.RingGeometry(585, 595, 64);
         const ringMat = new THREE.MeshBasicMaterial({
             color: 0x00f0ff,
             side: THREE.DoubleSide,
@@ -171,31 +202,172 @@ class DomeViewer {
     }
 
     /* --------------------------------------------------------------------------
-       CONTROL DEL ELEMENTO DE VIDEO
+       MOTOR DE REPRODUCCIÓN SEGMENTADA (DOBLE BÚFER PING-PONG)
        -------------------------------------------------------------------------- */
-    initVideo() {
-        this.video.addEventListener('loadedmetadata', () => {
-            if (this.video.videoWidth && this.video.videoHeight) {
-                const aspect = this.video.videoWidth / this.video.videoHeight;
-                this.domeMaterial.uniforms.uAspect.value = aspect;
+    initSegmentEngine() {
+        // Cargar manifest dinámico si está disponible o usar DEFAULT_SEGMENTS
+        fetch('segments/manifest.json')
+            .then(res => res.json())
+            .then(data => {
+                if (Array.isArray(data) && data.length > 0) {
+                    this.segments = data;
+                    this.totalDuration = this.segments[this.segments.length - 1].end;
+                    this.updateTotalDuration();
+                }
+            })
+            .catch(() => {
+                // Usar fallback ya configurado
+            });
+
+        // Configurar fuentes iniciales
+        this.setupVideoEvents(this.videoA, 'A');
+        this.setupVideoEvents(this.videoB, 'B');
+
+        // Cargar primer segmento en Video A
+        this.videoA.src = this.segments[0].file;
+        this.videoA.load();
+
+        // Precargar segundo segmento en Video B
+        if (this.segments.length > 1) {
+            this.videoB.src = this.segments[1].file;
+            this.videoB.load();
+        }
+
+        this.updateTotalDuration();
+    }
+
+    setupVideoEvents(videoEl, id) {
+        videoEl.addEventListener('loadedmetadata', () => {
+            if (videoEl === this.activeVideo) {
+                if (videoEl.videoWidth && videoEl.videoHeight) {
+                    const aspect = videoEl.videoWidth / videoEl.videoHeight;
+                    this.domeMaterial.uniforms.uAspect.value = aspect;
+                }
+                this.updateTotalDuration();
             }
-            this.updateTotalDuration();
-            this.showToast(`Video cargado: ${this.video.videoWidth}x${this.video.videoHeight}px`);
         });
 
-        this.video.addEventListener('timeupdate', () => {
-            if (!this.isScrubbing) {
-                this.updateTimeline();
+        videoEl.addEventListener('timeupdate', () => {
+            if (videoEl === this.activeVideo && !this.isScrubbing) {
+                this.onActiveTimeUpdate();
             }
         });
 
-        this.video.addEventListener('ended', () => {
+        videoEl.addEventListener('ended', () => {
+            if (videoEl === this.activeVideo) {
+                this.transitionToNextSegment();
+            }
+        });
+
+        videoEl.addEventListener('error', (e) => {
+            console.warn(`Video ${id} error:`, e);
+        });
+    }
+
+    onActiveTimeUpdate() {
+        const seg = this.segments[this.currentSegmentIndex];
+        if (!seg) return;
+
+        const globalTime = seg.start + this.activeVideo.currentTime;
+        this.updateTimelineWithTime(globalTime);
+
+        // Disparar precarga y transición cuando faltan 0.08 segundos para terminar el segmento
+        const remaining = seg.duration - this.activeVideo.currentTime;
+        if (remaining <= 0.08 && remaining > 0 && !this.isTransitioning) {
+            this.transitionToNextSegment();
+        }
+    }
+
+    transitionToNextSegment() {
+        if (!this.isSegmentedMode) {
             this.setPlayState(false);
-        });
+            return;
+        }
 
-        this.video.addEventListener('error', () => {
-            this.showToast('Nota: Usa "Cargar Video" o arrastra el archivo si el navegador bloquea la reproducción directa.', 6000);
-        });
+        const nextIndex = (this.currentSegmentIndex + 1) % this.segments.length;
+        this.isTransitioning = true;
+
+        // Intercambiar roles de Video A y Video B
+        const nextActive = this.standbyVideo;
+        const nextStandby = this.activeVideo;
+        const nextTexture = (nextActive === this.videoA) ? this.textureA : this.textureB;
+
+        this.currentSegmentIndex = nextIndex;
+        this.activeVideo = nextActive;
+        this.standbyVideo = nextStandby;
+
+        // Actualizar textura Three.js inmediatamente
+        this.domeMaterial.uniforms.tVideo.value = nextTexture;
+
+        // Sincronizar volumen, mute y velocidad
+        this.activeVideo.volume = this.standbyVideo.volume;
+        this.activeVideo.muted = this.standbyVideo.muted;
+        this.activeVideo.playbackRate = this.playbackSpeeds[this.speedIndex];
+
+        if (this.isPlaying) {
+            const playProm = this.activeVideo.play();
+            if (playProm !== undefined) {
+                playProm.catch(e => console.warn("Next segment play error:", e));
+            }
+        }
+
+        // Precargar el segmento subsiguiente en el standby
+        const futureIndex = (nextIndex + 1) % this.segments.length;
+        this.standbyVideo.src = this.segments[futureIndex].file;
+        this.standbyVideo.load();
+
+        setTimeout(() => {
+            this.isTransitioning = false;
+        }, 150);
+    }
+
+    seekGlobalTime(targetTime) {
+        targetTime = Math.max(0, Math.min(this.totalDuration, targetTime));
+
+        if (!this.isSegmentedMode) {
+            this.activeVideo.currentTime = targetTime;
+            this.updateTimelineWithTime(targetTime);
+            return;
+        }
+
+        // Encontrar a qué segmento corresponde el tiempo
+        let targetIndex = 0;
+        for (let i = 0; i < this.segments.length; i++) {
+            if (targetTime >= this.segments[i].start && targetTime < this.segments[i].end) {
+                targetIndex = i;
+                break;
+            }
+        }
+        if (targetTime >= this.segments[this.segments.length - 1].end) {
+            targetIndex = this.segments.length - 1;
+        }
+
+        const targetSeg = this.segments[targetIndex];
+        const offsetInSegment = targetTime - targetSeg.start;
+
+        this.currentSegmentIndex = targetIndex;
+        this.activeVideo.src = targetSeg.file;
+        this.activeVideo.currentTime = offsetInSegment;
+
+        if (this.isPlaying) {
+            this.activeVideo.play().catch(e => console.warn("Seek play error:", e));
+        }
+
+        // Precargar siguiente en standby
+        const nextIndex = (targetIndex + 1) % this.segments.length;
+        this.standbyVideo.src = this.segments[nextIndex].file;
+        this.standbyVideo.load();
+
+        this.updateTimelineWithTime(targetTime);
+    }
+
+    getGlobalCurrentTime() {
+        if (!this.isSegmentedMode) {
+            return this.activeVideo.currentTime || 0;
+        }
+        const seg = this.segments[this.currentSegmentIndex];
+        if (!seg) return 0;
+        return seg.start + (this.activeVideo.currentTime || 0);
     }
 
     /* --------------------------------------------------------------------------
@@ -233,7 +405,7 @@ class DomeViewer {
             e.preventDefault();
             this.dropzone.classList.remove('active');
             if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-                this.loadVideoFile(e.dataTransfer.files[0]);
+                this.loadCustomVideoFile(e.dataTransfer.files[0]);
             }
         });
 
@@ -253,13 +425,12 @@ class DomeViewer {
         const deltaX = e.clientX - this.previousMousePosition.x;
         const deltaY = e.clientY - this.previousMousePosition.y;
 
-        // Sensibilidad ajustada según FOV actual (más suave con zoom)
         const sensitivity = 0.18 * (this.fov / 75);
 
-        this.targetYaw -= deltaX * sensitivity;
-        this.targetPitch += deltaY * sensitivity;
+        this.targetYaw += deltaX * sensitivity;
+        this.targetPitch -= deltaY * sensitivity;
 
-        // Limitar pitch para no voltear la cámara (máx cenit 89.9°, mín nadir -89.9°)
+        // Limitar elevación para evitar gimbal lock (Cenit = 90°, Suelo = -90°)
         this.targetPitch = Math.max(-89.9, Math.min(89.9, this.targetPitch));
 
         this.previousMousePosition = { x: e.clientX, y: e.clientY };
@@ -271,8 +442,9 @@ class DomeViewer {
 
     onWheel(e) {
         e.preventDefault();
-        const zoomDelta = e.deltaY * 0.05;
-        this.targetFov = Math.max(25, Math.min(115, this.targetFov + zoomDelta));
+        const zoomSpeed = 0.05;
+        this.targetFov += e.deltaY * zoomSpeed;
+        this.targetFov = Math.max(30, Math.min(120, this.targetFov)); // Límites de FOV
     }
 
     onKeyDown(e) {
@@ -285,10 +457,10 @@ class DomeViewer {
             this.toggleFullscreen();
         } else if (e.code === 'KeyM') {
             this.toggleMute();
-        } else if (e.code === 'KeyR') {
-            this.setPresetView('zenith');
         } else if (e.code === 'KeyH') {
             this.uiLayer.classList.toggle('ui-hidden');
+        } else if (e.code === 'KeyR') {
+            this.setPresetView('zenith');
         }
     }
 
@@ -305,45 +477,53 @@ class DomeViewer {
     }
 
     /* --------------------------------------------------------------------------
-       CONTROLES DE UI E INTERACCIÓN
+       CONSTRUCCIÓN Y EVENTOS DE INTERFAZ (UI & CONTROLES)
        -------------------------------------------------------------------------- */
     initUI() {
-        // Botón Entrar en Splash Screen
-        document.getElementById('btn-enter').addEventListener('click', () => {
-            this.splashScreen.classList.add('hidden');
-            this.playVideo();
-        });
+        // Botón Start Splash
+        const btnStart = document.getElementById('btn-start-experience');
+        if (btnStart) {
+            btnStart.addEventListener('click', () => {
+                this.splashScreen.classList.add('hidden');
+                this.playVideo();
+            });
+        }
 
-        // Botón Play / Pausa
-        const btnPlay = document.getElementById('btn-play-pause');
-        btnPlay.addEventListener('click', () => this.togglePlay());
+        // Botón Play/Pausa
+        document.getElementById('btn-play').addEventListener('click', () => this.togglePlay());
 
-        // Botón Mute y Slider Volumen
-        const btnMute = document.getElementById('btn-mute');
+        // Botón Volumen / Mute
+        document.getElementById('btn-mute').addEventListener('click', () => this.toggleMute());
+
         const volumeSlider = document.getElementById('volume-slider');
-        btnMute.addEventListener('click', () => this.toggleMute());
         volumeSlider.addEventListener('input', (e) => {
-            this.video.volume = parseFloat(e.target.value);
-            this.video.muted = (this.video.volume === 0);
+            const val = parseFloat(e.target.value);
+            this.videoA.volume = val;
+            this.videoB.volume = val;
+            this.videoA.muted = false;
+            this.videoB.muted = false;
             this.updateVolumeIcons();
         });
 
-        // Botón Velocidad de Reproducción
+        // Timeline Scrubbing
+        const timelineContainer = document.getElementById('timeline-container');
+        timelineContainer.addEventListener('mousedown', (e) => this.startScrubbing(e));
+        window.addEventListener('mousemove', (e) => {
+            if (this.isScrubbing) this.scrub(e);
+        });
+        window.addEventListener('mouseup', () => {
+            this.isScrubbing = false;
+        });
+
+        // Velocidad de Reproducción
         const btnSpeed = document.getElementById('btn-speed');
         btnSpeed.addEventListener('click', () => {
             this.speedIndex = (this.speedIndex + 1) % this.playbackSpeeds.length;
             const speed = this.playbackSpeeds[this.speedIndex];
-            this.video.playbackRate = speed;
-            btnSpeed.textContent = `${speed.toFixed(speed % 1 === 0 ? 1 : 2)}x`;
+            this.videoA.playbackRate = speed;
+            this.videoB.playbackRate = speed;
+            btnSpeed.querySelector('span').textContent = `${speed}x`;
             this.showToast(`Velocidad: ${speed}x`);
-        });
-
-        // Botón Rotación Automática
-        const btnAutoRotate = document.getElementById('btn-auto-rotate');
-        btnAutoRotate.addEventListener('click', () => {
-            this.autoRotate = !this.autoRotate;
-            btnAutoRotate.classList.toggle('active', this.autoRotate);
-            this.showToast(this.autoRotate ? 'Rotación automática: ON' : 'Rotación automática: OFF');
         });
 
         // Conmutador Semiesfera / Esfera Completa
@@ -351,50 +531,10 @@ class DomeViewer {
         btnToggleHemi.addEventListener('click', () => {
             this.config.hemisphereOnly = !this.config.hemisphereOnly;
             this.domeMaterial.uniforms.uHemisphereOnly.value = this.config.hemisphereOnly ? 1.0 : 0.0;
-            btnToggleHemi.classList.toggle('active', !this.config.hemisphereOnly);
-            if (this.horizonGrid) this.horizonGrid.visible = this.config.hemisphereOnly;
-            this.showToast(this.config.hemisphereOnly ? 'Modo: Semiesfera Superior (Domo)' : 'Modo: Esfera 360 Completa');
-        });
-
-        // Selector de Proyección (Fisheye Fulldome / Equirectangular)
-        const btnProjection = document.getElementById('btn-projection-toggle');
-        const projBadge = document.getElementById('projection-badge');
-        btnProjection.addEventListener('click', () => {
-            this.config.projectionMode = this.config.projectionMode === 0 ? 1 : 0;
-            this.domeMaterial.uniforms.uProjectionMode.value = this.config.projectionMode;
-            if (this.config.projectionMode === 0) {
-                btnProjection.querySelector('span').textContent = 'Fisheye';
-                projBadge.textContent = 'FULLDOME 180°';
-                this.showToast('Proyección: Ojo de Pez (Fulldome Master)');
-            } else {
-                btnProjection.querySelector('span').textContent = 'Equirect';
-                projBadge.textContent = 'EQUIRECTANGULAR 360°';
-                this.showToast('Proyección: Equirectangular 360°');
-            }
-        });
-
-        // Presets de Visión de Cámara
-        document.querySelectorAll('.btn-preset').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                document.querySelectorAll('.btn-preset').forEach(b => b.classList.remove('active'));
-                e.target.classList.add('active');
-                this.setPresetView(e.target.dataset.view);
-            });
-        });
-
-        // Brújula / Widget de Orientación (clic para volver al cenit)
-        document.getElementById('orientation-widget').addEventListener('click', () => {
-            this.setPresetView('zenith');
-        });
-
-        // Scrubber / Línea de Tiempo
-        const timeline = document.getElementById('timeline-container');
-        timeline.addEventListener('mousedown', (e) => this.startScrubbing(e));
-        window.addEventListener('mousemove', (e) => {
-            if (this.isScrubbing) this.scrub(e);
-        });
-        window.addEventListener('mouseup', () => {
-            if (this.isScrubbing) this.isScrubbing = false;
+            this.horizonGrid.visible = this.config.hemisphereOnly;
+            const modeName = this.config.hemisphereOnly ? 'Semiesfera Superior (Domo)' : 'Esfera Completa 360°';
+            document.getElementById('projection-badge').textContent = this.config.hemisphereOnly ? 'FULLDOME 180°' : 'ESFERA 360°';
+            this.showToast(`Modo: ${modeName}`);
         });
 
         // Cargar Archivo Local
@@ -402,12 +542,12 @@ class DomeViewer {
             this.fileInput.click();
         });
         this.fileInput.addEventListener('change', (e) => {
-            if (e.target.files.length > 0) {
-                this.loadVideoFile(e.target.files[0]);
+            if (e.target.files && e.target.files.length > 0) {
+                this.loadCustomVideoFile(e.target.files[0]);
             }
         });
 
-        // Captura de Pantalla
+        // Captura de pantalla
         document.getElementById('btn-snapshot').addEventListener('click', () => this.takeSnapshot());
 
         // Pantalla Completa
@@ -418,18 +558,31 @@ class DomeViewer {
         const btnCloseSettings = document.getElementById('btn-close-settings');
         btnSettings.addEventListener('click', () => {
             this.settingsDrawer.classList.toggle('open');
-            btnSettings.classList.toggle('active', this.settingsDrawer.classList.contains('open'));
         });
         btnCloseSettings.addEventListener('click', () => {
             this.settingsDrawer.classList.remove('open');
-            btnSettings.classList.remove('active');
         });
 
-        // Sliders de Calibración
-        this.bindCalibrationSliders();
+        // Controles de Calibración del Shader
+        this.initCalibrationControls();
+
+        // Presets de Cámara
+        document.querySelectorAll('.btn-preset').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const preset = e.currentTarget.dataset.view;
+                this.setPresetView(preset);
+                this.showToast(`Vista: ${preset.toUpperCase()}`);
+            });
+        });
+
+        // Widget Brújula
+        document.getElementById('compass-widget').addEventListener('click', () => {
+            this.setPresetView('zenith');
+            this.showToast('Reorientado al Cenit');
+        });
     }
 
-    bindCalibrationSliders() {
+    initCalibrationControls() {
         const sFov = document.getElementById('slider-dome-fov');
         const lFov = document.getElementById('lbl-dome-fov');
         sFov.addEventListener('input', (e) => {
@@ -513,7 +666,7 @@ class DomeViewer {
        ACCIONES DE REPRODUCCIÓN Y CONTROL
        -------------------------------------------------------------------------- */
     playVideo() {
-        const playPromise = this.video.play();
+        const playPromise = this.activeVideo.play();
         if (playPromise !== undefined) {
             playPromise.then(() => {
                 this.setPlayState(true);
@@ -525,12 +678,13 @@ class DomeViewer {
     }
 
     pauseVideo() {
-        this.video.pause();
+        this.activeVideo.pause();
+        this.standbyVideo.pause();
         this.setPlayState(false);
     }
 
     togglePlay() {
-        if (this.video.paused) {
+        if (this.activeVideo.paused) {
             this.playVideo();
         } else {
             this.pauseVideo();
@@ -544,16 +698,19 @@ class DomeViewer {
     }
 
     toggleMute() {
-        this.video.muted = !this.video.muted;
+        const isMuted = !this.activeVideo.muted;
+        this.videoA.muted = isMuted;
+        this.videoB.muted = isMuted;
         this.updateVolumeIcons();
     }
 
     updateVolumeIcons() {
-        const isMuted = this.video.muted || this.video.volume === 0;
+        const isMuted = this.activeVideo.muted || this.activeVideo.volume === 0;
         document.getElementById('icon-volume').style.display = isMuted ? 'none' : 'block';
         document.getElementById('icon-mute').style.display = isMuted ? 'block' : 'none';
-        if (!isMuted && this.video.volume === 0) {
-            this.video.volume = 0.5;
+        if (!isMuted && this.activeVideo.volume === 0) {
+            this.videoA.volume = 0.5;
+            this.videoB.volume = 0.5;
             document.getElementById('volume-slider').value = 0.5;
         }
     }
@@ -566,29 +723,30 @@ class DomeViewer {
     scrub(e) {
         const rect = document.getElementById('timeline-container').getBoundingClientRect();
         const pos = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-        if (isFinite(this.video.duration) && this.video.duration > 0) {
-            this.video.currentTime = pos * this.video.duration;
-            this.updateTimeline();
-        }
+        const targetTime = pos * this.totalDuration;
+        this.seekGlobalTime(targetTime);
     }
 
-    updateTimeline() {
-        if (!this.video.duration) return;
-        const progress = (this.video.currentTime / this.video.duration) * 100;
+    updateTimelineWithTime(currentTime) {
+        if (!this.totalDuration || this.totalDuration <= 0) return;
+        const progress = (currentTime / this.totalDuration) * 100;
         document.getElementById('timeline-progress').style.width = `${progress}%`;
         document.getElementById('timeline-handle').style.left = `${progress}%`;
-        document.getElementById('time-current').textContent = this.formatTime(this.video.currentTime);
+        document.getElementById('time-current').textContent = this.formatTime(currentTime);
 
-        // Buffer progress
-        if (this.video.buffered.length > 0) {
-            const buffered = (this.video.buffered.end(this.video.buffered.length - 1) / this.video.duration) * 100;
-            document.getElementById('timeline-buffer').style.width = `${buffered}%`;
+        // Buffer progress aproximado
+        if (this.activeVideo.buffered.length > 0) {
+            const bufferedLocal = this.activeVideo.buffered.end(this.activeVideo.buffered.length - 1);
+            const segStart = this.isSegmentedMode ? (this.segments[this.currentSegmentIndex]?.start || 0) : 0;
+            const bufferedGlobal = segStart + bufferedLocal;
+            const bufferedPercent = (bufferedGlobal / this.totalDuration) * 100;
+            document.getElementById('timeline-buffer').style.width = `${Math.min(100, bufferedPercent)}%`;
         }
     }
 
     updateTotalDuration() {
-        if (this.video.duration) {
-            document.getElementById('time-total').textContent = this.formatTime(this.video.duration);
+        if (this.totalDuration) {
+            document.getElementById('time-total').textContent = this.formatTime(this.totalDuration);
         }
     }
 
@@ -598,13 +756,18 @@ class DomeViewer {
         return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
     }
 
-    loadVideoFile(file) {
+    loadCustomVideoFile(file) {
+        this.isSegmentedMode = false;
         const url = URL.createObjectURL(file);
-        this.video.src = url;
-        this.video.load();
+        this.activeVideo.src = url;
+        this.activeVideo.load();
+        this.activeVideo.addEventListener('loadedmetadata', () => {
+            this.totalDuration = this.activeVideo.duration;
+            this.updateTotalDuration();
+        }, { once: true });
         this.playVideo();
         document.getElementById('file-name-badge').textContent = file.name;
-        this.showToast(`Cargado: ${file.name}`);
+        this.showToast(`Cargado archivo local: ${file.name}`);
     }
 
     setPresetView(preset) {

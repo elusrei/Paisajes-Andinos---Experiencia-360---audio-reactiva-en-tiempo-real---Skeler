@@ -22,10 +22,9 @@
     <!-- Contenedor 3D WebGL -->
     <div id="canvas-container"></div>
 
-    <!-- Elemento de Video (Oculto para textura WebGL) -->
-    <video id="dome-video" playsinline webkit-playsinline crossOrigin="anonymous" loop preload="auto" style="display:none;">
-        <source src="Paisajes andinos, Elián.mp4" type="video/mp4">
-    </video>
+    <!-- Elementos de Video en Doble Búfer (Ping-Pong para reproducción continua sin cortes) -->
+    <video id="dome-video-a" playsinline webkit-playsinline crossOrigin="anonymous" preload="auto" style="display:none;"></video>
+    <video id="dome-video-b" playsinline webkit-playsinline crossOrigin="anonymous" preload="auto" style="display:none;"></video>
 
     <!-- Selector de Archivo Local Oculto -->
     <input type="file" id="file-input" accept="video/mp4,video/webm,video/ogg,image/*" style="display: none;">
@@ -50,7 +49,7 @@
                             <span class="status-dot"></span>
                             <span id="projection-badge">FULLDOME 180°</span>
                         </span>
-                        <span id="file-name-badge">Paisajes andinos, Elián.mp4</span>
+                        <span id="file-name-badge">Paisajes andinos, Elián (4K Master)</span>
                     </div>
                 </div>
             </div>
@@ -280,7 +279,7 @@
             <p>Visualización interactiva desde el interior de la semiesfera superior con mapeo de deformación ojo de pez para domo.</p>
 
             <div class="file-info-badge">
-                Archivo objetivo: Paisajes andinos, Elián.mp4
+                Archivo objetivo: Paisajes andinos, Elián (4K Master - 8 Segmentos Fluídos)
             </div>
 
             <div class="instructions-grid">
