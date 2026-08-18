@@ -35,6 +35,7 @@
     box-sizing: border-box;
     user-select: none;
     -webkit-user-drag: none;
+    touch-action: none;
 }
 
 html, body {
@@ -84,7 +85,7 @@ html, body {
 }
 
 /* ==========================================================================
-   CAPA DE INTERFAZ DE USUARIO (HUD) CON HOVER PROGRESIVO Y FADE IN INICIAL
+   CAPA DE INTERFAZ DE USUARIO (HUD) CON HOVER Y MOVIMIENTO SUTIL
    ========================================================================== */
 
 .ui-layer {
@@ -101,38 +102,30 @@ html, body {
     padding: 1.5rem;
 }
 
-/* Animación inicial de 4 segundos al entrar */
-.ui-layer.initial-fadein .top-bar,
-.ui-layer.initial-fadein .bottom-bar {
-    animation: initialUiFadeIn 4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-}
-
-@keyframes initialUiFadeIn {
-    0% { opacity: 0; transform: translateY(6px); }
-    40% { opacity: 0.35; transform: translateY(0); }
-    100% { opacity: 0.35; transform: translateY(0); }
-}
-
-/* Hover progresivo: sutil al mover cerca, consolidado al estar sobre la barra */
-.top-bar, .bottom-bar {
+/* En reposo: totalmente invisibles (opacidad 0) */
+.top-bar, .bottom-bar, .sphere-nav-widget-container {
     pointer-events: auto;
     opacity: 0;
     transform: translateY(0);
-    transition: opacity 0.5s cubic-bezier(0.16, 1, 0.3, 1), transform 0.5s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.3s;
+    transition: opacity 0.45s cubic-bezier(0.16, 1, 0.3, 1), transform 0.45s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.3s;
 }
 
-.ui-layer:hover .top-bar,
-.ui-layer:hover .bottom-bar {
-    opacity: 0.35;
+/* Al mover el mouse: aparece sugerente y sutil (opacidad 0.30) */
+.ui-layer.mouse-active .top-bar,
+.ui-layer.mouse-active .bottom-bar,
+.ui-layer.mouse-active .sphere-nav-widget-container {
+    opacity: 0.30;
 }
 
+/* Si el usuario hace hover directo: se consolida con opacidad plena (opacidad 1.0) */
 .top-bar:hover,
-.bottom-bar:hover {
+.bottom-bar:hover,
+.sphere-nav-widget-container:hover {
     opacity: 1 !important;
 }
 
 /* ==========================================================================
-   BARRA SUPERIOR (SOLO TÍTULO CENTRADO, SIN BOTONES)
+   BARRA SUPERIOR (SOLO TÍTULO CENTRADO)
    ========================================================================== */
 
 .top-bar {
@@ -161,12 +154,23 @@ html, body {
    WIDGET ESFERA 360° DE NAVEGACIÓN Y RESETEO
    ========================================================================== */
 
-.sphere-nav-widget {
+.sphere-nav-widget-container {
     position: fixed;
-    top: 5.5rem;
+    top: 5.25rem;
     left: 1.75rem;
-    width: 56px;
-    height: 56px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.35rem;
+    z-index: 20;
+    cursor: pointer;
+    pointer-events: auto;
+    transition: opacity 0.4s ease, transform 0.3s ease;
+}
+
+.sphere-nav-widget {
+    width: 54px;
+    height: 54px;
     border-radius: 50%;
     background: rgba(255, 255, 255, 0.06);
     backdrop-filter: blur(18px);
@@ -175,23 +179,32 @@ html, body {
     display: flex;
     align-items: center;
     justify-content: center;
-    cursor: pointer;
-    pointer-events: auto;
-    opacity: 0.3;
-    transition: opacity 0.4s ease, transform 0.3s ease, border-color 0.3s ease;
-    z-index: 20;
+    transition: transform 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
 }
 
-.sphere-nav-widget:hover {
-    opacity: 0.95;
+.sphere-nav-widget-container:hover .sphere-nav-widget {
     transform: scale(1.08);
-    border-color: rgba(255, 255, 255, 0.45);
-    box-shadow: 0 0 20px rgba(255, 255, 255, 0.2);
+    border-color: rgba(255, 255, 255, 0.5);
+    box-shadow: 0 0 20px rgba(255, 255, 255, 0.25);
+}
+
+.sphere-label {
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.7);
+    text-shadow: 0 1px 4px rgba(0, 0, 0, 0.8);
+    transition: color 0.2s ease;
+}
+
+.sphere-nav-widget-container:hover .sphere-label {
+    color: #ffffff;
 }
 
 .sphere-globe {
-    width: 42px;
-    height: 42px;
+    width: 40px;
+    height: 40px;
     border-radius: 50%;
     position: relative;
     border: 1px solid rgba(255, 255, 255, 0.3);
@@ -232,7 +245,6 @@ html, body {
     transition: top 0.06s linear, left 0.06s linear;
 }
 
-/* Marcador de origen / reseteo inicial */
 .origin-marker {
     top: 35%;
     left: 65%;
@@ -241,7 +253,6 @@ html, body {
     box-shadow: 0 0 6px rgba(255, 255, 255, 0.6);
 }
 
-/* Marcador de vista actual interactivo */
 .current-marker {
     top: 35%;
     left: 65%;
@@ -268,7 +279,7 @@ html, body {
 .bar-section {
     display: flex;
     align-items: center;
-    gap: 0.6rem;
+    gap: 0.5rem;
 }
 
 /* 1. Izquierda: Play / Pausa + Stop */
@@ -297,8 +308,8 @@ html, body {
 }
 
 .btn-control-sub {
-    width: 32px;
-    height: 32px;
+    width: 34px;
+    height: 34px;
     border-radius: 50%;
     background: transparent;
     border: 1px solid transparent;
@@ -310,7 +321,8 @@ html, body {
     transition: all 0.2s ease;
 }
 
-.btn-control-sub:hover {
+.btn-control-sub:hover,
+.btn-control-sub.active {
     color: #ffffff;
     background: var(--glass-bg-subtle);
     border-color: var(--glass-border);
@@ -393,7 +405,7 @@ html, body {
     transform: translate(-50%, -50%) scale(1);
 }
 
-/* 3. Derecha: Volumen Vertical + Captura + Fullscreen */
+/* 3. Derecha: Volumen Vertical + Giroscopio + Captura + Fullscreen */
 .right-controls {
     flex-shrink: 0;
     position: relative;
@@ -447,6 +459,71 @@ html, body {
     background: rgba(255, 255, 255, 0.2);
     outline: none;
     cursor: pointer;
+}
+
+/* ==========================================================================
+   AVISO DE ROTACIÓN MOBILE
+   ========================================================================== */
+
+.orientation-prompt {
+    position: fixed;
+    top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(4, 6, 10, 0.88);
+    backdrop-filter: blur(20px);
+    z-index: 250;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1.5rem;
+    transition: opacity 0.4s ease, visibility 0.4s ease;
+}
+
+.orientation-prompt.hidden {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+}
+
+.orientation-prompt-card {
+    max-width: 380px;
+    width: 100%;
+    padding: 2rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 1rem;
+    animation: modalPop 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.phone-rotate-icon {
+    width: 60px;
+    height: 60px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.08);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #ffffff;
+    animation: rotatePhone 2.5s ease-in-out infinite;
+}
+
+@keyframes rotatePhone {
+    0%, 20% { transform: rotate(0deg); }
+    50%, 70% { transform: rotate(-90deg); }
+    100% { transform: rotate(0deg); }
+}
+
+.orientation-prompt-card h4 {
+    font-size: 1.2rem;
+    font-weight: 600;
+    color: #ffffff;
+}
+
+.orientation-prompt-card p {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    line-height: 1.5;
 }
 
 /* ==========================================================================
@@ -584,7 +661,6 @@ html, body {
     pointer-events: none;
 }
 
-/* Fondo con imagen-fondo.jpg desenfocado y girando */
 .splash-bg-rotator {
     position: absolute;
     top: 40%;
@@ -919,10 +995,17 @@ html, body {
 
 .dropzone-overlay.active { opacity: 1; visibility: visible; }
 
-/* Responsive */
+/* Responsive para Mobile */
 @media (max-width: 768px) {
-    .brand-title-centered { font-size: 0.72rem; }
-    .bottom-bar { padding: 0.6rem 0.85rem; }
-    .time-label { font-size: 0.65rem; min-width: 28px; }
-    .sphere-nav-widget { top: 4.5rem; left: 1rem; width: 46px; height: 46px; }
+    .ui-layer { padding: 0.75rem; }
+    .top-bar { padding: 0.5rem 1rem; max-width: 95%; }
+    .brand-title-centered { font-size: 0.68rem; }
+    .bottom-bar { padding: 0.5rem 0.75rem; max-width: 100%; gap: 0.6rem; }
+    .time-label { font-size: 0.62rem; min-width: 26px; }
+    .sphere-nav-widget-container { top: 3.8rem; left: 0.75rem; }
+    .sphere-nav-widget { width: 44px; height: 44px; }
+    .sphere-globe { width: 32px; height: 32px; }
+    .sphere-label { font-size: 0.55rem; }
+    .btn-control-main { width: 34px; height: 34px; }
+    .btn-control-sub { width: 30px; height: 30px; }
 }

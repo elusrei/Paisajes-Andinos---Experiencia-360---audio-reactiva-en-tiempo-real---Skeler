@@ -51,19 +51,22 @@
         </header>
 
         <!-- WIDGET ESFERA 360° DE NAVEGACIÓN Y RESETEO -->
-        <div class="sphere-nav-widget" id="orientation-widget" title="Esfera de orientación 360° (Clic para volver a la posición de origen)">
-            <div class="sphere-globe">
-                <!-- Anillos ortogonales de la esfera -->
-                <div class="sphere-ring ring-equator" id="sphere-equator"></div>
-                <div class="sphere-ring ring-meridian" id="sphere-meridian"></div>
-                <div class="sphere-ring ring-latitude" id="sphere-latitude"></div>
-                
-                <!-- Marcador de Origen / Reseteo fijo (punto inicial) -->
-                <div class="sphere-marker origin-marker" id="marker-origin" title="Punto de origen"></div>
-                
-                <!-- Marcador de Vista Actual en tiempo real -->
-                <div class="sphere-marker current-marker" id="marker-current" title="Punto de vista actual"></div>
+        <div class="sphere-nav-widget-container" id="orientation-widget-container">
+            <div class="sphere-nav-widget" id="orientation-widget" title="Esfera de orientación 360° (Clic para volver a la posición de origen)">
+                <div class="sphere-globe">
+                    <!-- Anillos ortogonales de la esfera -->
+                    <div class="sphere-ring ring-equator" id="sphere-equator"></div>
+                    <div class="sphere-ring ring-meridian" id="sphere-meridian"></div>
+                    <div class="sphere-ring ring-latitude" id="sphere-latitude"></div>
+                    
+                    <!-- Marcador de Origen / Reseteo fijo (punto inicial) -->
+                    <div class="sphere-marker origin-marker" id="marker-origin" title="Punto de origen"></div>
+                    
+                    <!-- Marcador de Vista Actual en tiempo real -->
+                    <div class="sphere-marker current-marker" id="marker-current" title="Punto de vista actual"></div>
+                </div>
             </div>
+            <span class="sphere-label">reset vista</span>
         </div>
 
         <!-- BARRA INFERIOR / REPRODUCTOR -->
@@ -103,7 +106,7 @@
                 <span class="time-label" id="time-total">03:38</span>
             </div>
 
-            <!-- 3. DERECHA: Volumen Vertical + Captura de Pantalla + Fullscreen -->
+            <!-- 3. DERECHA: Volumen Vertical + Giroscopio + Captura + Fullscreen -->
             <div class="bar-section right-controls">
                 
                 <!-- Contenedor de Volumen con Slider Vertical Flotante -->
@@ -127,7 +130,16 @@
                     </div>
                 </div>
 
-                <!-- Botón Captura de Pantalla (ubicado entre volumen y fullscreen) -->
+                <!-- Botón Giroscopio / Sensor de Movimiento Celular -->
+                <button class="btn-control-sub" id="btn-gyro" title="Activar / Desactivar Giroscopio (Mover el teléfono)">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                        <rect x="5" y="2" width="14" height="20" rx="3"/>
+                        <circle cx="12" cy="18" r="1"/>
+                        <path d="M10 6h4"/>
+                    </svg>
+                </button>
+
+                <!-- Botón Captura de Pantalla -->
                 <button class="btn-control-sub" id="btn-snapshot-bottom" title="Capturar Pantalla">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                         <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
@@ -145,6 +157,23 @@
 
         </footer>
 
+    </div>
+
+    <!-- AVISO DE ROTACIÓN DE PANTALLA EN MOBILE -->
+    <div class="orientation-prompt hidden" id="orientation-prompt">
+        <div class="orientation-prompt-card glass-card">
+            <div class="phone-rotate-icon">
+                <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                    <rect x="5" y="2" width="14" height="20" rx="2" class="phone-body"/>
+                    <path d="M12 18h.01"/>
+                    <path d="M19 12a7 7 0 0 0-7-7" stroke-dasharray="2 2"/>
+                    <polyline points="12 2 12 5 15 5"/>
+                </svg>
+            </div>
+            <h4>Girá tu pantalla</h4>
+            <p>Para una experiencia inmersiva completa, colocá tu dispositivo en posición horizontal.</p>
+            <button class="btn-frosted-secondary" id="btn-dismiss-orient">Continuar</button>
+        </div>
     </div>
 
     <!-- PANEL DE DIAGNÓSTICO Y DEBUG (ABRIBLE CON TECLA D) -->
@@ -186,8 +215,8 @@
                 <span class="val" id="dbg-buffered">0.0s</span>
             </div>
             <div class="debug-stat">
-                <span class="lbl">Standby Preload:</span>
-                <span class="val" id="dbg-standby">Pendiente</span>
+                <span class="lbl">Giroscopio:</span>
+                <span class="val" id="dbg-gyro">Inactivo</span>
             </div>
         </div>
 

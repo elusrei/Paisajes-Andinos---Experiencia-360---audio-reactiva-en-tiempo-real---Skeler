@@ -1,7 +1,7 @@
 /**
  * ==========================================================================
  * DOME 360° MASTER VIEWER - CONTROLADOR PRINCIPAL THREE.JS & REPRODUCTOR
- * CON SOPORTE PARA SEGMENTACIÓN 4K CONTINUA, DUAL BUFFERING Y DISEÑO FROSTED
+ * CON SOPORTE PARA SEGMENTACIÓN 4K CONTINUA, DUAL BUFFERING, GIROSCOPIO Y MOBILE
  * ==========================================================================
  */
 
@@ -26,6 +26,9 @@ const READY_STATE_MAP = [
 
 class DomeViewer {
     constructor() {
+        // Detección de Dispositivo Mobile
+        this.isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || ('ontouchstart' in window) || (window.innerWidth <= 768);
+
         // Elementos DOM
         this.container = document.getElementById('canvas-container');
         this.videoA = document.getElementById('dome-video-a');
@@ -34,6 +37,7 @@ class DomeViewer {
         this.fileInput = document.getElementById('file-input');
         this.dataWarningModal = document.getElementById('data-warning-modal');
         this.splashScreen = document.getElementById('splash-screen');
+        this.orientationPrompt = document.getElementById('orientation-prompt');
         this.dropzone = document.getElementById('dropzone');
         this.toastContainer = document.getElementById('toast-container');
         this.bufferingSpinner = document.getElementById('buffering-spinner');
@@ -62,8 +66,7 @@ class DomeViewer {
         this.isTransitioning = false;
         this.engineInitialized = false;
 
-        // Posición Inicial Solicitada:
-        // Menos zoom (FOV = 95°), más rotado hacia arriba (Pitch = 50°), mirando entre frente e izquierda (Yaw = 45°)
+        // Posición Inicial Solicitada
         this.defaultYaw = 45;
         this.defaultPitch = 50;
         this.defaultFov = 95;
@@ -77,10 +80,18 @@ class DomeViewer {
 
         this.isDragging = false;
         this.previousMousePosition = { x: 0, y: 0 };
+        this.touchStartDist = 0;
         this.damping = 0.08;
+
+        // Giroscopio / Sensor de Movimiento
+        this.gyroActive = false;
+        this.gyroBaseAlpha = null;
 
         // Teclado
         this.keys = {};
+
+        // Inactividad de Mouse
+        this.mouseTimeout = null;
 
         // Estado de Reproducción
         this.isPlaying = false;
@@ -109,19 +120,20 @@ class DomeViewer {
         this.currentFps = 60;
         this.pipActive = false;
 
-        // 1. Inicializar Three.js, UI y Gatekeeper
+        // 1. Inicializar Three.js, UI, Mobile y Gatekeeper
         this.initThree();
         this.initEvents();
         this.initUI();
         this.initDebug();
         this.initGatekeeper();
+        this.initMobileOrientationCheck();
         this.animate();
 
-        this.logDebug('Visor 360 inicializado correctamente', 'success');
+        this.logDebug(`Visor 360 inicializado (Modo: ${this.isMobile ? 'Mobile Optimizado' : 'Escritorio'})`, 'success');
     }
 
     /* --------------------------------------------------------------------------
-       PUERTA DE ENTRADA Y AHORRO DE DATOS (CERO DESCARGAS PREVIAS)
+       PUERTA DE ENTRADA Y AHORRO DE DATOS
        -------------------------------------------------------------------------- */
     initGatekeeper() {
         const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
@@ -143,7 +155,6 @@ class DomeViewer {
         if (isCellular) {
             if (this.dataWarningModal) this.dataWarningModal.classList.remove('hidden');
             if (this.splashScreen) this.splashScreen.classList.add('hidden');
-            this.logDebug('Conexión de datos móviles detectada: Mostrando aviso', 'warn');
         } else {
             if (this.dataWarningModal) this.dataWarningModal.classList.add('hidden');
             if (this.splashScreen) this.splashScreen.classList.remove('hidden');
@@ -174,7 +185,7 @@ class DomeViewer {
     }
 
     /* --------------------------------------------------------------------------
-       INICIALIZACIÓN THREE.JS
+       INICIALIZACIÓN THREE.JS (OPTIMIZADA PARA MOBILE & GPU)
        -------------------------------------------------------------------------- */
     initThree() {
         this.scene = new THREE.Scene();
@@ -185,12 +196,15 @@ class DomeViewer {
         this.camera.position.set(0, 0, 0);
 
         this.renderer = new THREE.WebGLRenderer({
-            antialias: true,
+            antialias: !this.isMobile,
             powerPreference: 'high-performance',
             preserveDrawingBuffer: true
         });
         this.renderer.setSize(window.innerWidth, window.innerHeight);
-        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+        // Optimización GPU Móvil: no sobrecargar con pixelRatio 3x/4x
+        const maxDpr = this.isMobile ? 1.25 : 2.0;
+        this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, maxDpr));
         this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
         this.renderer.toneMappingExposure = 1.0;
         this.container.appendChild(this.renderer.domElement);
@@ -242,9 +256,116 @@ class DomeViewer {
             depthTest: false
         });
 
-        const domeGeometry = new THREE.SphereGeometry(600, 96, 96);
+        // Geometría adaptativa (menos segmentos en mobile para fluidez total)
+        const segmentsCount = this.isMobile ? 48 : 96;
+        const domeGeometry = new THREE.SphereGeometry(600, segmentsCount, segmentsCount);
         this.domeMesh = new THREE.Mesh(domeGeometry, this.domeMaterial);
         this.scene.add(this.domeMesh);
+    }
+
+    /* --------------------------------------------------------------------------
+       DETECCIÓN DE ROTACIÓN EN MOBILE
+       -------------------------------------------------------------------------- */
+    initMobileOrientationCheck() {
+        if (!this.isMobile) return;
+
+        const checkOrient = () => {
+            const isPortrait = window.innerHeight > window.innerWidth;
+            if (this.orientationPrompt) {
+                if (isPortrait && !this.orientationDismissed) {
+                    this.orientationPrompt.classList.remove('hidden');
+                } else {
+                    this.orientationPrompt.classList.add('hidden');
+                }
+            }
+        };
+
+        window.addEventListener('resize', checkOrient);
+        window.addEventListener('orientationchange', () => setTimeout(checkOrient, 200));
+
+        const btnDismiss = document.getElementById('btn-dismiss-orient');
+        if (btnDismiss) {
+            btnDismiss.addEventListener('click', () => {
+                this.orientationDismissed = true;
+                if (this.orientationPrompt) this.orientationPrompt.classList.add('hidden');
+            });
+        }
+
+        checkOrient();
+    }
+
+    /* --------------------------------------------------------------------------
+       GIROSCOPIO / SENSOR DE MOVIMIENTO (DEVICE ORIENTATION)
+       -------------------------------------------------------------------------- */
+    toggleGyro() {
+        if (this.gyroActive) {
+            this.gyroActive = false;
+            window.removeEventListener('deviceorientation', this.handleDeviceOrientation);
+            const btnGyro = document.getElementById('btn-gyro');
+            if (btnGyro) btnGyro.classList.remove('active');
+            const dbgGyro = document.getElementById('dbg-gyro');
+            if (dbgGyro) dbgGyro.textContent = 'Inactivo';
+            this.showToast('Giroscopio desactivado');
+            return;
+        }
+
+        // Permiso en iOS 13+
+        if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+            DeviceOrientationEvent.requestPermission()
+                .then(state => {
+                    if (state === 'granted') {
+                        this.startGyroListener();
+                    } else {
+                        this.showToast('Permiso de giroscopio denegado');
+                    }
+                })
+                .catch(err => {
+                    this.showToast('Error accediendo a giroscopio');
+                });
+        } else if ('DeviceOrientationEvent' in window) {
+            this.startGyroListener();
+        } else {
+            this.showToast('Sensor de movimiento no disponible en este dispositivo');
+        }
+    }
+
+    startGyroListener() {
+        this.gyroActive = true;
+        this.gyroBaseAlpha = null;
+        this.handleDeviceOrientation = (e) => this.onDeviceOrientation(e);
+        window.addEventListener('deviceorientation', this.handleDeviceOrientation);
+
+        const btnGyro = document.getElementById('btn-gyro');
+        if (btnGyro) btnGyro.classList.add('active');
+
+        const dbgGyro = document.getElementById('dbg-gyro');
+        if (dbgGyro) dbgGyro.textContent = 'Activo';
+
+        this.showToast('Giroscopio activado: Movete con tu teléfono 📱', 4000);
+    }
+
+    onDeviceOrientation(e) {
+        if (!this.gyroActive || e.beta === null) return;
+
+        // Orientación de pantalla (horizontal vs vertical)
+        const orient = window.orientation || 0;
+        let pitchVal = e.beta;
+        let yawVal = e.alpha || 0;
+
+        if (orient === 90) {
+            pitchVal = -e.gamma;
+            yawVal = e.alpha + 90;
+        } else if (orient === -90) {
+            pitchVal = e.gamma;
+            yawVal = e.alpha - 90;
+        }
+
+        if (this.gyroBaseAlpha === null) {
+            this.gyroBaseAlpha = yawVal - this.defaultYaw;
+        }
+
+        this.targetPitch = Math.max(-89.9, Math.min(89.9, pitchVal));
+        this.targetYaw = yawVal - this.gyroBaseAlpha;
     }
 
     /* --------------------------------------------------------------------------
@@ -256,11 +377,6 @@ class DomeViewer {
             setTimeout(() => {
                 this.splashScreen.style.display = 'none';
             }, 700);
-        }
-
-        // Fade in inicial de 4 segundos en la interfaz
-        if (this.uiLayer) {
-            this.uiLayer.classList.add('initial-fadein');
         }
 
         this.showBuffering('Iniciando 4K...');
@@ -293,21 +409,20 @@ class DomeViewer {
                 this.setPlayState(true);
                 this.hideBuffering();
 
-                // Precargar inmediatamente el segmento 1 en standby
+                // Precargar standby con timing optimizado
                 if (this.segments.length > 1) {
-                    this.videoB.src = this.segments[1].file;
-                    this.videoB.preload = "auto";
-                    this.videoB.load();
+                    this.standbyVideo.src = this.segments[1].file;
+                    this.standbyVideo.preload = "auto";
+                    this.standbyVideo.load();
                 }
-            }).catch(err => {
-                this.logDebug(`Play prevent: ${err.message}`, 'warn');
+            }).catch(() => {
                 this.videoA.muted = true;
                 this.videoB.muted = true;
                 this.videoA.play().then(() => {
                     this.setPlayState(true);
                     this.hideBuffering();
                     this.updateVolumeIcons();
-                    this.showToast('Audio silenciado por navegador. Clic en volumen para sonido.', 4000);
+                    this.showToast('Audio silenciado por navegador. Tocá el volumen para activar.', 4000);
                 }).catch(() => {
                     this.setPlayState(false);
                     this.hideBuffering();
@@ -318,7 +433,6 @@ class DomeViewer {
 
     setupVideoEvents(videoEl, name) {
         videoEl.addEventListener('loadedmetadata', () => {
-            this.logDebug(`[${name}] metadata: ${videoEl.videoWidth}x${videoEl.videoHeight}`, 'success');
             if (videoEl === this.activeVideo) {
                 this.updateTotalDuration();
             }
@@ -369,7 +483,7 @@ class DomeViewer {
         const globalTime = seg.start + this.activeVideo.currentTime;
         this.updateTimelineWithTime(globalTime);
 
-        // Precargar el siguiente segmento en standby
+        // Precargar siguiente segmento en standby
         const nextIndex = (this.currentSegmentIndex + 1) % this.segments.length;
         if (!this.standbyVideo.src || this.standbyVideo.src.indexOf(this.segments[nextIndex].file) === -1) {
             this.standbyVideo.src = this.segments[nextIndex].file;
@@ -377,7 +491,7 @@ class DomeViewer {
             this.standbyVideo.load();
         }
 
-        // Transición anticipada continua para evitar cualquier congelamiento
+        // Transición anticipada continua para reproducción fluida
         const remaining = seg.duration - this.activeVideo.currentTime;
         if (remaining <= 0.08 && remaining > 0 && !this.isTransitioning) {
             this.transitionToNextSegment();
@@ -421,7 +535,6 @@ class DomeViewer {
             }
         }
 
-        // Precargar el subsiguiente en standby
         const futureIndex = (nextIndex + 1) % this.segments.length;
         this.standbyVideo.src = this.segments[futureIndex].file;
         this.standbyVideo.preload = "auto";
@@ -530,6 +643,21 @@ class DomeViewer {
             window.addEventListener('mouseup', () => {
                 this.isScrubbing = false;
             });
+            timelineContainer.addEventListener('touchstart', (e) => this.startScrubbingTouch(e), { passive: false });
+            window.addEventListener('touchmove', (e) => {
+                if (this.isScrubbing) this.scrubTouch(e);
+            }, { passive: false });
+            window.addEventListener('touchend', () => {
+                this.isScrubbing = false;
+            });
+        }
+
+        const btnGyro = document.getElementById('btn-gyro');
+        if (btnGyro) {
+            btnGyro.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.toggleGyro();
+            });
         }
 
         const btnSnapshotBottom = document.getElementById('btn-snapshot-bottom');
@@ -538,8 +666,7 @@ class DomeViewer {
         const btnFullscreenBottom = document.getElementById('btn-fullscreen-bottom');
         if (btnFullscreenBottom) btnFullscreenBottom.addEventListener('click', () => this.toggleFullscreen());
 
-        // Widget Esfera 360° -> Clic para resetear a la posición inicial
-        const sphereWidget = document.getElementById('orientation-widget');
+        const sphereWidget = document.getElementById('orientation-widget-container');
         if (sphereWidget) {
             sphereWidget.addEventListener('click', () => {
                 this.targetYaw = this.defaultYaw;
@@ -548,6 +675,25 @@ class DomeViewer {
                 this.showToast('Vista reorientada al origen');
             });
         }
+    }
+
+    startScrubbingTouch(e) {
+        if (e.touches && e.touches.length > 0) {
+            e.preventDefault();
+            this.isScrubbing = true;
+            this.scrubTouch(e);
+        }
+    }
+
+    scrubTouch(e) {
+        if (!e.touches || e.touches.length === 0) return;
+        const timeline = document.getElementById('timeline-container');
+        if (!timeline) return;
+        const rect = timeline.getBoundingClientRect();
+        const touch = e.touches[0];
+        const pos = Math.max(0, Math.min(1, (touch.clientX - rect.left) / rect.width));
+        const targetTime = pos * this.totalDuration;
+        this.seekGlobalTime(targetTime);
     }
 
     /* --------------------------------------------------------------------------
@@ -676,7 +822,7 @@ class DomeViewer {
         link.download = `paisajes-andinos-${Date.now()}.png`;
         link.href = dataURL;
         link.click();
-        this.showToast('Captura guardada en descargas');
+        this.showToast('Captura guardada');
     }
 
     toggleFullscreen() {
@@ -747,15 +893,6 @@ class DomeViewer {
 
         const dbgNext = document.getElementById('dbg-btn-next');
         if (dbgNext) dbgNext.addEventListener('click', () => this.transitionToNextSegment());
-
-        const dbgProj = document.getElementById('dbg-btn-proj');
-        if (dbgProj) {
-            dbgProj.addEventListener('click', () => {
-                this.config.projectionMode = this.config.projectionMode === 0 ? 1 : 0;
-                this.domeMaterial.uniforms.uProjectionMode.value = this.config.projectionMode;
-                this.showToast(`Proyección: ${this.config.projectionMode === 0 ? 'Fisheye' : 'Equirectangular'}`);
-            });
-        }
 
         const dbgPip = document.getElementById('dbg-btn-pip');
         if (dbgPip) {
@@ -842,26 +979,41 @@ Segmento: #${this.currentSegmentIndex + 1} (${seg.file || 'N/A'}`;
             const bufEnd = this.activeVideo.buffered.end(this.activeVideo.buffered.length - 1);
             elBuf.textContent = `${bufEnd.toFixed(1)}s`;
         }
-
-        const elStby = document.getElementById('dbg-standby');
-        if (elStby && this.standbyVideo) {
-            const nextIdx = (this.currentSegmentIndex + 1) % this.segments.length;
-            elStby.textContent = `Seg #${nextIdx + 1} (${READY_STATE_MAP[this.standbyVideo.readyState] || '0'})`;
-        }
     }
 
     /* --------------------------------------------------------------------------
-       EVENTOS DE NAVEGACIÓN Y RATÓN (DIRECCIÓN NATURAL DIRECTA)
+       EVENTOS DE NAVEGACIÓN, RATÓN Y TOQUES (NATURAL DIRECTO)
        -------------------------------------------------------------------------- */
     initEvents() {
         window.addEventListener('resize', () => this.onWindowResize());
 
+        // Manejo de movimiento de mouse para presencia sutil
+        const triggerMouseActive = () => {
+            if (this.uiLayer) {
+                this.uiLayer.classList.add('mouse-active');
+                clearTimeout(this.mouseTimeout);
+                this.mouseTimeout = setTimeout(() => {
+                    this.uiLayer.classList.remove('mouse-active');
+                }, 2800);
+            }
+        };
+
+        window.addEventListener('mousemove', triggerMouseActive);
+        window.addEventListener('touchstart', triggerMouseActive, { passive: true });
+
+        // Eventos de ratón
         this.container.addEventListener('pointerdown', (e) => this.onPointerDown(e));
         window.addEventListener('pointermove', (e) => this.onPointerMove(e));
         window.addEventListener('pointerup', () => this.onPointerUp());
 
         this.container.addEventListener('wheel', (e) => this.onWheel(e), { passive: false });
 
+        // Eventos táctiles (Pinch to Zoom & Touch Drag)
+        this.container.addEventListener('touchstart', (e) => this.onTouchStart(e), { passive: false });
+        this.container.addEventListener('touchmove', (e) => this.onTouchMove(e), { passive: false });
+        this.container.addEventListener('touchend', () => this.onTouchEnd());
+
+        // Teclado
         window.addEventListener('keydown', (e) => this.onKeyDown(e));
         window.addEventListener('keyup', (e) => this.onKeyUp(e));
     }
@@ -873,16 +1025,13 @@ Segmento: #${this.currentSegmentIndex + 1} (${seg.file || 'N/A'}`;
     }
 
     onPointerMove(e) {
-        if (!this.isDragging) return;
+        if (!this.isDragging || this.gyroActive) return;
 
         const deltaX = e.clientX - this.previousMousePosition.x;
         const deltaY = e.clientY - this.previousMousePosition.y;
 
         const sensitivity = 0.18 * (this.fov / 75);
 
-        // NAVEGACIÓN DIRECTA (PARA DONDE SE MUEVE EL RATÓN):
-        // Arriba/Abajo: mover ratón arriba mira arriba, mover abajo mira abajo (-deltaY)
-        // Izquierda/Derecha: mover ratón izquierda mira izquierda, mover derecha mira derecha (-deltaX)
         this.targetYaw -= deltaX * sensitivity;
         this.targetPitch -= deltaY * sensitivity;
         this.targetPitch = Math.max(-89.9, Math.min(89.9, this.targetPitch));
@@ -891,6 +1040,50 @@ Segmento: #${this.currentSegmentIndex + 1} (${seg.file || 'N/A'}`;
     }
 
     onPointerUp() {
+        this.isDragging = false;
+    }
+
+    onTouchStart(e) {
+        if (e.touches.length === 1) {
+            this.isDragging = true;
+            this.previousMousePosition = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+        } else if (e.touches.length === 2) {
+            this.isDragging = false;
+            const dx = e.touches[0].clientX - e.touches[1].clientX;
+            const dy = e.touches[0].clientY - e.touches[1].clientY;
+            this.touchStartDist = Math.hypot(dx, dy);
+        }
+    }
+
+    onTouchMove(e) {
+        if (this.gyroActive) return;
+
+        if (e.touches.length === 1 && this.isDragging) {
+            e.preventDefault();
+            const deltaX = e.touches[0].clientX - this.previousMousePosition.x;
+            const deltaY = e.touches[0].clientY - this.previousMousePosition.y;
+
+            const sensitivity = 0.22 * (this.fov / 75);
+
+            this.targetYaw -= deltaX * sensitivity;
+            this.targetPitch -= deltaY * sensitivity;
+            this.targetPitch = Math.max(-89.9, Math.min(89.9, this.targetPitch));
+
+            this.previousMousePosition = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+        } else if (e.touches.length === 2) {
+            e.preventDefault();
+            const dx = e.touches[0].clientX - e.touches[1].clientX;
+            const dy = e.touches[0].clientY - e.touches[1].clientY;
+            const dist = Math.hypot(dx, dy);
+            const deltaDist = dist - this.touchStartDist;
+
+            this.targetFov -= deltaDist * 0.08;
+            this.targetFov = Math.max(30, Math.min(125, this.targetFov));
+            this.touchStartDist = dist;
+        }
+    }
+
+    onTouchEnd() {
         this.isDragging = false;
     }
 
