@@ -1,48 +1,48 @@
 [
   {
-    "file": "segments\\segment_00.mp4",
+    "file": "segments/segment_00.mp4",
     "start": 0.0,
     "duration": 33.357,
     "end": 33.357
   },
   {
-    "file": "segments\\segment_01.mp4",
+    "file": "segments/segment_01.mp4",
     "start": 33.357,
     "duration": 28.7,
     "end": 62.057
   },
   {
-    "file": "segments\\segment_02.mp4",
+    "file": "segments/segment_02.mp4",
     "start": 62.057,
     "duration": 22.667,
     "end": 84.723
   },
   {
-    "file": "segments\\segment_03.mp4",
+    "file": "segments/segment_03.mp4",
     "start": 84.723,
     "duration": 29.1,
     "end": 113.823
   },
   {
-    "file": "segments\\segment_04.mp4",
+    "file": "segments/segment_04.mp4",
     "start": 113.823,
     "duration": 29.4,
     "end": 143.223
   },
   {
-    "file": "segments\\segment_05.mp4",
+    "file": "segments/segment_05.mp4",
     "start": 143.223,
     "duration": 28.867,
     "end": 172.09
   },
   {
-    "file": "segments\\segment_06.mp4",
+    "file": "segments/segment_06.mp4",
     "start": 172.09,
     "duration": 24.033,
     "end": 196.123
   },
   {
-    "file": "segments\\segment_07.mp4",
+    "file": "segments/segment_07.mp4",
     "start": 196.123,
     "duration": 22.133,
     "end": 218.257

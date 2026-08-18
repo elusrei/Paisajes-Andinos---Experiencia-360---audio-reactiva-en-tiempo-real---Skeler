@@ -219,7 +219,10 @@ class DomeViewer {
             .then(res => res.json())
             .then(data => {
                 if (Array.isArray(data) && data.length > 0) {
-                    this.segments = data;
+                    this.segments = data.map(item => ({
+                        ...item,
+                        file: item.file.replace(/\\/g, '/')
+                    }));
                     this.totalDuration = this.segments[this.segments.length - 1].end;
                     this.updateTotalDuration();
                 }
