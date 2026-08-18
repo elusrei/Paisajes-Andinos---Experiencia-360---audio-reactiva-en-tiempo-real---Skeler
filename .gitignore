@@ -1,0 +1,9 @@
+# Archivos de respaldo de video 4K pesado (>100MB no permitidos en push directo a GitHub)
+*_4K_original.mp4
+*_backup.mp4
+*.tmp
+*.log
+
+# Entornos y logs de sistema
+.DS_Store
+Thumbs.db
