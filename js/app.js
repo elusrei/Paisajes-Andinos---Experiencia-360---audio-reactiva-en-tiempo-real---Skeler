@@ -34,12 +34,13 @@ class DomeViewer {
         this.fileInput = document.getElementById('file-input');
         this.dataWarningModal = document.getElementById('data-warning-modal');
         this.splashScreen = document.getElementById('splash-screen');
-        this.settingsDrawer = document.getElementById('settings-drawer');
         this.dropzone = document.getElementById('dropzone');
         this.toastContainer = document.getElementById('toast-container');
         this.bufferingSpinner = document.getElementById('buffering-spinner');
         this.bufferingText = document.getElementById('buffering-text');
         this.debugPanel = document.getElementById('debug-panel');
+        this.markerOrigin = document.getElementById('marker-origin');
+        this.markerCurrent = document.getElementById('marker-current');
 
         // Estado Three.js
         this.scene = null;
@@ -50,9 +51,8 @@ class DomeViewer {
         this.textureA = null;
         this.textureB = null;
         this.activeTexture = null;
-        this.horizonGrid = null;
 
-        // Estado del Motor de Segmentos (Doble Búfer)
+        // Estado del Motor de Segmentos (Doble Búfer Ping-Pong)
         this.isSegmentedMode = true;
         this.segments = [...DEFAULT_SEGMENTS];
         this.currentSegmentIndex = 0;
@@ -62,11 +62,11 @@ class DomeViewer {
         this.isTransitioning = false;
         this.engineInitialized = false;
 
-        // Posición Inicial de Cámara Solicitada:
-        // Mirando entre la izquierda y el frente (Yaw = 45°), 30° hacia arriba (Pitch = 30°), zoom más alejado (FOV = 88°)
+        // Posición Inicial Solicitada:
+        // Menos zoom (FOV = 95°), más rotado hacia arriba (Pitch = 50°), mirando entre frente e izquierda (Yaw = 45°)
         this.defaultYaw = 45;
-        this.defaultPitch = 30;
-        this.defaultFov = 88;
+        this.defaultPitch = 50;
+        this.defaultFov = 95;
 
         this.yaw = this.defaultYaw;
         this.pitch = this.defaultPitch;
@@ -78,8 +78,6 @@ class DomeViewer {
         this.isDragging = false;
         this.previousMousePosition = { x: 0, y: 0 };
         this.damping = 0.08;
-        this.autoRotate = false;
-        this.autoRotateSpeed = 0.15;
 
         // Teclado
         this.keys = {};
@@ -104,9 +102,6 @@ class DomeViewer {
             hemisphereOnly: false
         };
 
-        // Temporizador de inactividad de UI
-        this.uiTimeout = null;
-
         // Diagnóstico / Debug
         this.debugLogs = [];
         this.frameCount = 0;
@@ -114,7 +109,7 @@ class DomeViewer {
         this.currentFps = 60;
         this.pipActive = false;
 
-        // 1. Inicializar Three.js y Eventos UI
+        // 1. Inicializar Three.js, UI y Gatekeeper
         this.initThree();
         this.initEvents();
         this.initUI();
@@ -126,10 +121,9 @@ class DomeViewer {
     }
 
     /* --------------------------------------------------------------------------
-       PUERTA DE ENTRADA Y GESTIÓN DE DATOS MÓVILES (CERO DESCARGAS INICIALES)
+       PUERTA DE ENTRADA Y AHORRO DE DATOS (CERO DESCARGAS PREVIAS)
        -------------------------------------------------------------------------- */
     initGatekeeper() {
-        // Detectar si el usuario está en red celular / datos móviles
         const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
         const isCellular = conn && (conn.type === 'cellular' || conn.saveData === true || ['2g', '3g', '4g'].includes(conn.effectiveType));
 
@@ -147,12 +141,10 @@ class DomeViewer {
         }
 
         if (isCellular) {
-            // Mostrar aviso de datos móviles primero
             if (this.dataWarningModal) this.dataWarningModal.classList.remove('hidden');
             if (this.splashScreen) this.splashScreen.classList.add('hidden');
-            this.logDebug('Detectada conexión de datos móviles: Mostrando advertencia previa', 'warn');
+            this.logDebug('Conexión de datos móviles detectada: Mostrando aviso', 'warn');
         } else {
-            // En Wi-Fi o Escritorio: pasar directo a la pantalla de bienvenida
             if (this.dataWarningModal) this.dataWarningModal.classList.add('hidden');
             if (this.splashScreen) this.splashScreen.classList.remove('hidden');
             this.loadManifestOnly();
@@ -173,11 +165,11 @@ class DomeViewer {
                     }));
                     this.totalDuration = this.segments[this.segments.length - 1].end;
                     this.updateTotalDuration();
-                    this.logDebug(`Manifest cargado: ${this.segments.length} segmentos (Duración total: ${this.totalDuration.toFixed(1)}s)`, 'info');
+                    this.logDebug(`Manifest cargado: ${this.segments.length} segmentos`, 'info');
                 }
             })
             .catch(() => {
-                this.logDebug(`Uso de lista por defecto (${this.segments.length} segmentos)`, 'info');
+                this.logDebug(`Uso de manifest predeterminado (${this.segments.length} segmentos)`, 'info');
             });
     }
 
@@ -203,7 +195,6 @@ class DomeViewer {
         this.renderer.toneMappingExposure = 1.0;
         this.container.appendChild(this.renderer.domElement);
 
-        // Texturas para Doble Búfer (Video A y Video B)
         if (window.location.protocol.startsWith('http')) {
             this.videoA.crossOrigin = 'anonymous';
             this.videoB.crossOrigin = 'anonymous';
@@ -227,7 +218,6 @@ class DomeViewer {
 
         this.activeTexture = this.textureA;
 
-        // Material con Shader Fulldome
         const uniforms = THREE.UniformsUtils.clone(DomeShader.uniforms);
         if (uniforms.tVideo) uniforms.tVideo.value = this.activeTexture;
         if (uniforms.uAspect) uniforms.uAspect.value = 1.0;
@@ -252,14 +242,13 @@ class DomeViewer {
             depthTest: false
         });
 
-        // Geometría Esférica
         const domeGeometry = new THREE.SphereGeometry(600, 96, 96);
         this.domeMesh = new THREE.Mesh(domeGeometry, this.domeMaterial);
         this.scene.add(this.domeMesh);
     }
 
     /* --------------------------------------------------------------------------
-       ENTRADA A LA EXPERIENCIA Y CEBADO DUAL DE VIDEO (SEAMLESS AUTOPLAY)
+       ENTRADA A LA EXPERIENCIA Y GAPLESS PING-PONG PLAYBACK
        -------------------------------------------------------------------------- */
     enterExperience() {
         if (this.splashScreen) {
@@ -269,9 +258,12 @@ class DomeViewer {
             }, 700);
         }
 
-        this.showBuffering('Iniciando 4K...');
+        // Fade in inicial de 4 segundos en la interfaz
+        if (this.uiLayer) {
+            this.uiLayer.classList.add('initial-fadein');
+        }
 
-        // Desbloquear / cebar ambos reproductores con el gesto del usuario
+        this.showBuffering('Iniciando 4K...');
         this.primeAndStartPlayback();
     }
 
@@ -282,7 +274,6 @@ class DomeViewer {
             this.setupVideoEvents(this.videoB, 'Video B');
         }
 
-        // Asignar primer segmento a Video A
         this.currentSegmentIndex = 0;
         this.activeVideo = this.videoA;
         this.standbyVideo = this.videoB;
@@ -301,25 +292,23 @@ class DomeViewer {
             playA.then(() => {
                 this.setPlayState(true);
                 this.hideBuffering();
-                this.logDebug('Video A iniciado correctamente', 'success');
 
-                // Precargar y desbloquear Video B en segundo plano con volumen sincronizado
+                // Precargar inmediatamente el segmento 1 en standby
                 if (this.segments.length > 1) {
                     this.videoB.src = this.segments[1].file;
                     this.videoB.preload = "auto";
                     this.videoB.load();
                 }
             }).catch(err => {
-                this.logDebug(`Autoplay protegido: ${err.message}`, 'warn');
+                this.logDebug(`Play prevent: ${err.message}`, 'warn');
                 this.videoA.muted = true;
                 this.videoB.muted = true;
                 this.videoA.play().then(() => {
                     this.setPlayState(true);
                     this.hideBuffering();
                     this.updateVolumeIcons();
-                    this.showToast('Reproduciendo en silencio. Clic en altavoz para sonido.', 4000);
-                }).catch(e => {
-                    this.logDebug(`Error play: ${e.message}`, 'error');
+                    this.showToast('Audio silenciado por navegador. Clic en volumen para sonido.', 4000);
+                }).catch(() => {
                     this.setPlayState(false);
                     this.hideBuffering();
                 });
@@ -328,23 +317,14 @@ class DomeViewer {
     }
 
     setupVideoEvents(videoEl, name) {
-        videoEl.addEventListener('loadstart', () => {
-            this.logDebug(`[${name}] loadstart: ${videoEl.src.split('/').pop()}`, 'info');
-        });
-
         videoEl.addEventListener('loadedmetadata', () => {
-            this.logDebug(`[${name}] metadata: ${videoEl.videoWidth}x${videoEl.videoHeight} (${videoEl.duration.toFixed(1)}s)`, 'success');
+            this.logDebug(`[${name}] metadata: ${videoEl.videoWidth}x${videoEl.videoHeight}`, 'success');
             if (videoEl === this.activeVideo) {
-                if (videoEl.videoWidth && videoEl.videoHeight) {
-                    const aspect = videoEl.videoWidth / videoEl.videoHeight;
-                    this.domeMaterial.uniforms.uAspect.value = aspect;
-                }
                 this.updateTotalDuration();
             }
         });
 
         videoEl.addEventListener('loadeddata', () => {
-            this.logDebug(`[${name}] loadeddata listo`, 'info');
             if (videoEl === this.activeVideo && this.activeTexture) {
                 this.activeTexture.needsUpdate = true;
             }
@@ -357,36 +337,19 @@ class DomeViewer {
         });
 
         videoEl.addEventListener('ended', () => {
-            this.logDebug(`[${name}] ended (fin de segmento)`, 'info');
             if (videoEl === this.activeVideo) {
                 this.transitionToNextSegment();
             }
         });
 
         videoEl.addEventListener('play', () => {
-            this.logDebug(`[${name}] play iniciado`, 'info');
             if (videoEl === this.activeVideo) {
                 this.setPlayState(true);
                 this.hideBuffering();
             }
         });
 
-        videoEl.addEventListener('playing', () => {
-            this.logDebug(`[${name}] playing fluido`, 'success');
-            if (videoEl === this.activeVideo) {
-                this.hideBuffering();
-            }
-        });
-
-        videoEl.addEventListener('pause', () => {
-            this.logDebug(`[${name}] pause`, 'info');
-            if (videoEl === this.activeVideo && !this.isTransitioning) {
-                this.setPlayState(false);
-            }
-        });
-
         videoEl.addEventListener('waiting', () => {
-            this.logDebug(`[${name}] waiting buffer`, 'warn');
             if (videoEl === this.activeVideo && this.isPlaying) {
                 this.showBuffering('Cargando 4K...');
             }
@@ -395,15 +358,6 @@ class DomeViewer {
         videoEl.addEventListener('canplay', () => {
             if (videoEl === this.activeVideo && this.isPlaying) {
                 this.hideBuffering();
-            }
-        });
-
-        videoEl.addEventListener('error', () => {
-            const errCode = videoEl.error ? videoEl.error.code : 'Desconocido';
-            this.logDebug(`[${name}] ERROR código ${errCode}`, 'error');
-            if (videoEl === this.activeVideo) {
-                this.hideBuffering();
-                this.showToast(`Error de segmento (Código ${errCode})`, 4000);
             }
         });
     }
@@ -415,16 +369,17 @@ class DomeViewer {
         const globalTime = seg.start + this.activeVideo.currentTime;
         this.updateTimelineWithTime(globalTime);
 
-        // Precargar siguiente segmento en standby si aún no se asignó
+        // Precargar el siguiente segmento en standby
         const nextIndex = (this.currentSegmentIndex + 1) % this.segments.length;
         if (!this.standbyVideo.src || this.standbyVideo.src.indexOf(this.segments[nextIndex].file) === -1) {
             this.standbyVideo.src = this.segments[nextIndex].file;
+            this.standbyVideo.preload = "auto";
             this.standbyVideo.load();
         }
 
-        // Transición anticipada ultra fluida (0.10s antes del final)
+        // Transición anticipada continua para evitar cualquier congelamiento
         const remaining = seg.duration - this.activeVideo.currentTime;
-        if (remaining <= 0.10 && remaining > 0 && !this.isTransitioning) {
+        if (remaining <= 0.08 && remaining > 0 && !this.isTransitioning) {
             this.transitionToNextSegment();
         }
     }
@@ -437,7 +392,7 @@ class DomeViewer {
 
         const nextIndex = (this.currentSegmentIndex + 1) % this.segments.length;
         this.isTransitioning = true;
-        this.logDebug(`Transición a Segmento #${nextIndex + 1} (${this.segments[nextIndex].file})`, 'info');
+        this.logDebug(`Conmutando a segmento #${nextIndex + 1} (${this.segments[nextIndex].file})`, 'info');
 
         const nextActive = this.standbyVideo;
         const nextStandby = this.activeVideo;
@@ -460,23 +415,23 @@ class DomeViewer {
                 playProm.then(() => {
                     this.setPlayState(true);
                     this.hideBuffering();
-                }).catch(e => {
-                    this.logDebug(`Reintento play transición: ${e.message}`, 'warn');
+                }).catch(() => {
                     this.activeVideo.play().catch(() => {});
                 });
             }
         }
 
-        // Precargar subsiguiente en standby
+        // Precargar el subsiguiente en standby
         const futureIndex = (nextIndex + 1) % this.segments.length;
         this.standbyVideo.src = this.segments[futureIndex].file;
+        this.standbyVideo.preload = "auto";
         this.standbyVideo.load();
 
         if (this.pipActive) this.updatePipPreview();
 
         setTimeout(() => {
             this.isTransitioning = false;
-        }, 250);
+        }, 200);
     }
 
     seekGlobalTime(targetTime) {
@@ -497,14 +452,12 @@ class DomeViewer {
         const offsetInSegment = targetTime - targetSeg.start;
 
         this.showBuffering('Saltando...');
-        this.logDebug(`Seek ${targetTime.toFixed(1)}s -> Segmento #${targetIndex + 1}`, 'info');
-
         this.currentSegmentIndex = targetIndex;
         this.activeVideo.src = targetSeg.file;
         this.activeVideo.currentTime = offsetInSegment;
 
         if (this.isPlaying) {
-            this.activeVideo.play().catch(e => this.logDebug(`Seek play catch: ${e.message}`, 'warn'));
+            this.activeVideo.play().catch(() => {});
         }
 
         const nextIndex = (targetIndex + 1) % this.segments.length;
@@ -517,7 +470,7 @@ class DomeViewer {
     stopVideo() {
         this.pauseVideo();
         this.seekGlobalTime(0);
-        this.showToast('Reproducción detenida (0:00)');
+        this.showToast('Detenido (0:00)');
     }
 
     /* --------------------------------------------------------------------------
@@ -579,166 +532,20 @@ class DomeViewer {
             });
         }
 
-        const projToggleBtn = document.getElementById('btn-projection-toggle');
-        if (projToggleBtn) {
-            projToggleBtn.addEventListener('click', () => {
-                this.config.projectionMode = this.config.projectionMode === 0 ? 1 : 0;
-                this.domeMaterial.uniforms.uProjectionMode.value = this.config.projectionMode;
-                const label = this.config.projectionMode === 0 ? 'Fisheye' : 'Equirectangular';
-                const span = projToggleBtn.querySelector('span');
-                if (span) span.textContent = label;
-                this.showToast(`Proyección: ${label}`);
-            });
-        }
+        const btnSnapshotBottom = document.getElementById('btn-snapshot-bottom');
+        if (btnSnapshotBottom) btnSnapshotBottom.addEventListener('click', () => this.takeSnapshot());
 
-        const btnToggleHemi = document.getElementById('btn-toggle-hemi');
-        if (btnToggleHemi) {
-            btnToggleHemi.addEventListener('click', () => {
-                this.config.hemisphereOnly = !this.config.hemisphereOnly;
-                this.domeMaterial.uniforms.uHemisphereOnly.value = this.config.hemisphereOnly ? 1.0 : 0.0;
-                this.showToast(`Modo: ${this.config.hemisphereOnly ? 'Semiesfera' : 'Esfera Completa'}`);
-            });
-        }
-
-        const btnLoadFile = document.getElementById('btn-load-file');
-        if (btnLoadFile) {
-            btnLoadFile.addEventListener('click', () => this.fileInput.click());
-        }
-        if (this.fileInput) {
-            this.fileInput.addEventListener('change', (e) => {
-                if (e.target.files && e.target.files.length > 0) {
-                    this.loadCustomVideoFile(e.target.files[0]);
-                }
-            });
-        }
-
-        const btnSnapshot = document.getElementById('btn-snapshot');
-        if (btnSnapshot) btnSnapshot.addEventListener('click', () => this.takeSnapshot());
-
-        const btnFullscreen = document.getElementById('btn-fullscreen');
         const btnFullscreenBottom = document.getElementById('btn-fullscreen-bottom');
-        const handleFullscreen = () => this.toggleFullscreen();
-        if (btnFullscreen) btnFullscreen.addEventListener('click', handleFullscreen);
-        if (btnFullscreenBottom) btnFullscreenBottom.addEventListener('click', handleFullscreen);
+        if (btnFullscreenBottom) btnFullscreenBottom.addEventListener('click', () => this.toggleFullscreen());
 
-        const btnSettings = document.getElementById('btn-settings-toggle');
-        const btnCloseSettings = document.getElementById('btn-close-settings');
-        if (btnSettings) {
-            btnSettings.addEventListener('click', () => this.settingsDrawer.classList.toggle('open'));
-        }
-        if (btnCloseSettings) {
-            btnCloseSettings.addEventListener('click', () => this.settingsDrawer.classList.remove('open'));
-        }
-
-        // Widget de Brújula Multieje -> Clic para resetear a posición inicial
-        const compWidget = document.getElementById('orientation-widget');
-        if (compWidget) {
-            compWidget.addEventListener('click', () => {
+        // Widget Esfera 360° -> Clic para resetear a la posición inicial
+        const sphereWidget = document.getElementById('orientation-widget');
+        if (sphereWidget) {
+            sphereWidget.addEventListener('click', () => {
                 this.targetYaw = this.defaultYaw;
                 this.targetPitch = this.defaultPitch;
                 this.targetFov = this.defaultFov;
-                this.showToast('Orientación restablecida');
-            });
-        }
-
-        this.initCalibrationControls();
-    }
-
-    initCalibrationControls() {
-        const sFov = document.getElementById('slider-dome-fov');
-        const lFov = document.getElementById('lbl-dome-fov');
-        if (sFov) {
-            sFov.addEventListener('input', (e) => {
-                const val = parseFloat(e.target.value);
-                this.config.domeFov = val;
-                this.domeMaterial.uniforms.uDomeFov.value = (val * Math.PI) / 180;
-                if (lFov) lFov.textContent = `${val}°`;
-            });
-        }
-
-        const sScale = document.getElementById('slider-scale');
-        const lScale = document.getElementById('lbl-scale');
-        if (sScale) {
-            sScale.addEventListener('input', (e) => {
-                const val = parseFloat(e.target.value);
-                this.config.scale = val;
-                this.domeMaterial.uniforms.uScale.value = val;
-                if (lScale) lScale.textContent = `${val.toFixed(2)}x`;
-            });
-        }
-
-        const sOffX = document.getElementById('slider-offset-x');
-        const lOffX = document.getElementById('lbl-offset-x');
-        if (sOffX) {
-            sOffX.addEventListener('input', (e) => {
-                const val = parseFloat(e.target.value);
-                this.config.offsetX = val;
-                this.domeMaterial.uniforms.uOffsetX.value = val;
-                if (lOffX) lOffX.textContent = val.toFixed(2);
-            });
-        }
-
-        const sOffY = document.getElementById('slider-offset-y');
-        const lOffY = document.getElementById('lbl-offset-y');
-        if (sOffY) {
-            sOffY.addEventListener('input', (e) => {
-                const val = parseFloat(e.target.value);
-                this.config.offsetY = val;
-                this.domeMaterial.uniforms.uOffsetY.value = val;
-                if (lOffY) lOffY.textContent = val.toFixed(2);
-            });
-        }
-
-        const sRot = document.getElementById('slider-rotation');
-        const lRot = document.getElementById('lbl-rotation');
-        if (sRot) {
-            sRot.addEventListener('input', (e) => {
-                const val = parseFloat(e.target.value);
-                this.config.rotation = val;
-                this.domeMaterial.uniforms.uRotation.value = (val * Math.PI) / 180;
-                if (lRot) lRot.textContent = `${val}°`;
-            });
-        }
-
-        const sExp = document.getElementById('slider-exposure');
-        const lExp = document.getElementById('lbl-exposure');
-        if (sExp) {
-            sExp.addEventListener('input', (e) => {
-                const val = parseFloat(e.target.value);
-                this.config.exposure = val;
-                this.domeMaterial.uniforms.uExposure.value = val;
-                if (lExp) lExp.textContent = `${val.toFixed(2)}x`;
-            });
-        }
-
-        const chkFlipX = document.getElementById('chk-flip-x');
-        if (chkFlipX) {
-            chkFlipX.addEventListener('change', (e) => {
-                this.config.flipX = e.target.checked;
-                this.domeMaterial.uniforms.uFlipX.value = e.target.checked;
-            });
-        }
-
-        const chkFlipY = document.getElementById('chk-flip-y');
-        if (chkFlipY) {
-            chkFlipY.addEventListener('change', (e) => {
-                this.config.flipY = e.target.checked;
-                this.domeMaterial.uniforms.uFlipY.value = e.target.checked;
-            });
-        }
-
-        const btnResetCal = document.getElementById('btn-reset-calibration');
-        if (btnResetCal) {
-            btnResetCal.addEventListener('click', () => {
-                if (sFov) { sFov.value = 180; sFov.dispatchEvent(new Event('input')); }
-                if (sScale) { sScale.value = 1.0; sScale.dispatchEvent(new Event('input')); }
-                if (sOffX) { sOffX.value = 0.0; sOffX.dispatchEvent(new Event('input')); }
-                if (sOffY) { sOffY.value = 0.0; sOffY.dispatchEvent(new Event('input')); }
-                if (sRot) { sRot.value = 0; sRot.dispatchEvent(new Event('input')); }
-                if (sExp) { sExp.value = 1.0; sExp.dispatchEvent(new Event('input')); }
-                if (chkFlipX) { chkFlipX.checked = false; chkFlipX.dispatchEvent(new Event('change')); }
-                if (chkFlipY) { chkFlipY.checked = false; chkFlipY.dispatchEvent(new Event('change')); }
-                this.showToast('Calibración restablecida');
+                this.showToast('Vista reorientada al origen');
             });
         }
     }
@@ -760,8 +567,7 @@ class DomeViewer {
             playPromise.then(() => {
                 this.setPlayState(true);
                 this.hideBuffering();
-            }).catch(err => {
-                this.logDebug(`Play prevent: ${err.message}`, 'warn');
+            }).catch(() => {
                 this.activeVideo.muted = true;
                 this.videoA.muted = true;
                 this.videoB.muted = true;
@@ -863,24 +669,11 @@ class DomeViewer {
         return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
     }
 
-    loadCustomVideoFile(file) {
-        this.isSegmentedMode = false;
-        const url = URL.createObjectURL(file);
-        this.activeVideo.src = url;
-        this.activeVideo.load();
-        this.activeVideo.addEventListener('loadedmetadata', () => {
-            this.totalDuration = this.activeVideo.duration;
-            this.updateTotalDuration();
-        }, { once: true });
-        this.playVideo();
-        this.showToast(`Cargado: ${file.name}`);
-    }
-
     takeSnapshot() {
         this.renderer.render(this.scene, this.camera);
         const dataURL = this.renderer.domElement.toDataURL('image/png');
         const link = document.createElement('a');
-        link.download = `paisajes-andinos-captura-${Date.now()}.png`;
+        link.download = `paisajes-andinos-${Date.now()}.png`;
         link.href = dataURL;
         link.click();
         this.showToast('Captura guardada en descargas');
@@ -888,7 +681,7 @@ class DomeViewer {
 
     toggleFullscreen() {
         if (!document.fullscreenElement) {
-            document.documentElement.requestFullscreen().catch(err => console.warn(err));
+            document.documentElement.requestFullscreen().catch(() => {});
         } else {
             if (document.exitFullscreen) document.exitFullscreen();
         }
@@ -935,21 +728,14 @@ class DomeViewer {
             logContainer.appendChild(item);
             logContainer.scrollTop = logContainer.scrollHeight;
         }
-
         console.log(`[Visor360 ${type.toUpperCase()}] ${message}`);
     }
 
     /* --------------------------------------------------------------------------
-       PANEL DE DEBUG
+       PANEL DE DEBUG (TECLA D)
        -------------------------------------------------------------------------- */
     initDebug() {
-        const toggleBtn = document.getElementById('btn-debug-toggle');
         const closeBtn = document.getElementById('btn-close-debug');
-        if (toggleBtn) {
-            toggleBtn.addEventListener('click', () => {
-                this.debugPanel.classList.toggle('hidden');
-            });
-        }
         if (closeBtn) {
             closeBtn.addEventListener('click', () => {
                 this.debugPanel.classList.add('hidden');
@@ -967,10 +753,7 @@ class DomeViewer {
             dbgProj.addEventListener('click', () => {
                 this.config.projectionMode = this.config.projectionMode === 0 ? 1 : 0;
                 this.domeMaterial.uniforms.uProjectionMode.value = this.config.projectionMode;
-                const label = this.config.projectionMode === 0 ? 'Fisheye' : 'Equirectangular';
-                const span = document.querySelector('#btn-projection-toggle span');
-                if (span) span.textContent = label;
-                this.showToast(`Proyección: ${label}`);
+                this.showToast(`Proyección: ${this.config.projectionMode === 0 ? 'Fisheye' : 'Equirectangular'}`);
             });
         }
 
@@ -1019,10 +802,7 @@ FPS: ${this.currentFps}
 Buffer: ${this.activeVideo === this.videoA ? 'Video A' : 'Video B'}
 ReadyState: ${this.activeVideo ? READY_STATE_MAP[this.activeVideo.readyState] : 'null'}
 Tiempo: ${this.activeVideo ? this.activeVideo.currentTime.toFixed(2) : 0}s / ${this.totalDuration.toFixed(2)}s
-Segmento: #${this.currentSegmentIndex + 1} (${seg.file || 'N/A'})
-Resolución: ${this.activeVideo ? `${this.activeVideo.videoWidth}x${this.activeVideo.videoHeight}` : 'N/A'}
-Three.js Texture: ${this.activeTexture ? 'Activa' : 'Inactiva'}
-Shader Mode: ${this.config.projectionMode === 0 ? 'Fisheye' : 'Equirectangular'}`;
+Segmento: #${this.currentSegmentIndex + 1} (${seg.file || 'N/A'}`;
     }
 
     updateDebugPanel() {
@@ -1071,7 +851,7 @@ Shader Mode: ${this.config.projectionMode === 0 ? 'Fisheye' : 'Equirectangular'}
     }
 
     /* --------------------------------------------------------------------------
-       EVENTOS DE RATÓN, TECLADO Y VENTANA
+       EVENTOS DE NAVEGACIÓN Y RATÓN (DIRECCIÓN NATURAL DIRECTA)
        -------------------------------------------------------------------------- */
     initEvents() {
         window.addEventListener('resize', () => this.onWindowResize());
@@ -1084,25 +864,6 @@ Shader Mode: ${this.config.projectionMode === 0 ? 'Fisheye' : 'Equirectangular'}
 
         window.addEventListener('keydown', (e) => this.onKeyDown(e));
         window.addEventListener('keyup', (e) => this.onKeyUp(e));
-
-        window.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            this.dropzone.classList.add('active');
-        });
-
-        window.addEventListener('dragleave', (e) => {
-            if (e.relatedTarget === null) {
-                this.dropzone.classList.remove('active');
-            }
-        });
-
-        window.addEventListener('drop', (e) => {
-            e.preventDefault();
-            this.dropzone.classList.remove('active');
-            if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-                this.loadCustomVideoFile(e.dataTransfer.files[0]);
-            }
-        });
     }
 
     onPointerDown(e) {
@@ -1119,7 +880,10 @@ Shader Mode: ${this.config.projectionMode === 0 ? 'Fisheye' : 'Equirectangular'}
 
         const sensitivity = 0.18 * (this.fov / 75);
 
-        this.targetYaw += deltaX * sensitivity;
+        // NAVEGACIÓN DIRECTA (PARA DONDE SE MUEVE EL RATÓN):
+        // Arriba/Abajo: mover ratón arriba mira arriba, mover abajo mira abajo (-deltaY)
+        // Izquierda/Derecha: mover ratón izquierda mira izquierda, mover derecha mira derecha (-deltaX)
+        this.targetYaw -= deltaX * sensitivity;
         this.targetPitch -= deltaY * sensitivity;
         this.targetPitch = Math.max(-89.9, Math.min(89.9, this.targetPitch));
 
@@ -1184,7 +948,7 @@ Shader Mode: ${this.config.projectionMode === 0 ? 'Fisheye' : 'Equirectangular'}
             this.updateDebugPanel();
         }
 
-        // Actualizar textura de video en WebGL SOLO cuando hay fotogramas válidos
+        // Actualizar textura de video en WebGL
         if (this.activeVideo && this.activeVideo.readyState >= 2) {
             if (this.activeTexture) {
                 this.activeTexture.needsUpdate = true;
@@ -1196,14 +960,10 @@ Shader Mode: ${this.config.projectionMode === 0 ? 'Fisheye' : 'Equirectangular'}
 
         // Manejo de Teclado
         const keySpeed = 1.2;
-        if (this.keys['KeyA'] || this.keys['ArrowLeft']) this.targetYaw += keySpeed;
-        if (this.keys['KeyD'] || this.keys['ArrowRight']) this.targetYaw -= keySpeed;
+        if (this.keys['KeyA'] || this.keys['ArrowLeft']) this.targetYaw -= keySpeed;
+        if (this.keys['KeyD'] || this.keys['ArrowRight']) this.targetYaw += keySpeed;
         if (this.keys['KeyW'] || this.keys['ArrowUp']) this.targetPitch = Math.min(89.9, this.targetPitch + keySpeed);
         if (this.keys['KeyS'] || this.keys['ArrowDown']) this.targetPitch = Math.max(-89.9, this.targetPitch - keySpeed);
-
-        if (this.autoRotate && !this.isDragging) {
-            this.targetYaw += this.autoRotateSpeed;
-        }
 
         // Suavizado inercial
         this.yaw += (this.targetYaw - this.yaw) * this.damping;
@@ -1225,13 +985,27 @@ Shader Mode: ${this.config.projectionMode === 0 ? 'Fisheye' : 'Equirectangular'}
 
         this.camera.lookAt(targetX, targetY, targetZ);
 
-        // Agujas de la brújula multieje
-        const compassWidget = document.getElementById('orientation-widget');
-        if (compassWidget) {
-            const axisContainer = compassWidget.querySelector('.compass-multi-axis');
-            if (axisContainer) {
-                axisContainer.style.transform = `rotate(${-this.yaw}deg)`;
-            }
+        // Actualizar Esfera 360° de Orientación
+        if (this.markerCurrent) {
+            const radYaw = THREE.MathUtils.degToRad(this.yaw);
+            const radPitch = THREE.MathUtils.degToRad(this.pitch);
+
+            const currX = 50 + 36 * Math.cos(radPitch) * Math.sin(radYaw);
+            const currY = 50 - 36 * Math.sin(radPitch);
+
+            this.markerCurrent.style.left = `${currX}%`;
+            this.markerCurrent.style.top = `${currY}%`;
+        }
+
+        if (this.markerOrigin) {
+            const radDefYaw = THREE.MathUtils.degToRad(this.defaultYaw);
+            const radDefPitch = THREE.MathUtils.degToRad(this.defaultPitch);
+
+            const origX = 50 + 36 * Math.cos(radDefPitch) * Math.sin(radDefYaw);
+            const origY = 50 - 36 * Math.sin(radDefPitch);
+
+            this.markerOrigin.style.left = `${origX}%`;
+            this.markerOrigin.style.top = `${origY}%`;
         }
 
         // Renderizar escena 3D

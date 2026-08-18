@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Paisajes Andinos - Experiencia Inmersiva Reactiva en Tiempo Real (Render) - Elián Reinoso</title>
+    <title>Paisajes Andinos, Elián - Experiencia Inmersiva Reactiva en Tiempo Real</title>
     <meta name="description" content="Experiencia Fulldome 360° interactiva con video 4K y audio reactivo en tiempo real">
 
     <!-- Favicon Inline SVG -->
@@ -39,80 +39,34 @@
     <input type="file" id="file-input" accept="video/mp4,video/webm,video/ogg,image/*" style="display: none;">
 
     <!-- ====================================================================
-         CAPA DE INTERFAZ DE USUARIO (HUD BLANCO TRANSLÚCIDO FROSTED GLASS)
+         CAPA DE INTERFAZ DE USUARIO (HUD BLANCO TRANSLÚCIDO CON HOVER PROGRESIVO)
          ==================================================================== -->
     <div class="ui-layer" id="ui-layer">
         
-        <!-- BARRA SUPERIOR -->
+        <!-- BARRA SUPERIOR (SOLO TÍTULO CENTRADO) -->
         <header class="top-bar glass-panel" id="top-bar">
-            <div class="top-brand">
-                <div class="brand-title">Paisajes Andinos - Experiencia Inmersiva Reactiva en Tiempo Real (Render) - Elián Reinoso</div>
-            </div>
-
-            <div class="top-actions">
-                <!-- Cargar otro archivo -->
-                <button class="btn-icon" id="btn-load-file" title="Cargar otro video local">
-                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
-                    </svg>
-                </button>
-
-                <!-- Conmutar Semiesfera / Esfera Completa -->
-                <button class="btn-icon" id="btn-toggle-hemi" title="Alternar Semiesfera / Esfera Completa">
-                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-                        <path d="M12 3a9 9 0 0 1 9 9H3a9 9 0 0 1 9-9z"/>
-                        <path d="M3 12a9 9 0 0 0 18 0" stroke-dasharray="2 3"/>
-                    </svg>
-                </button>
-
-                <!-- Captura de pantalla -->
-                <button class="btn-icon" id="btn-snapshot" title="Capturar Pantalla">
-                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-                        <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
-                        <circle cx="12" cy="13" r="4"/>
-                    </svg>
-                </button>
-
-                <!-- Calibración / Ajustes -->
-                <button class="btn-icon" id="btn-settings-toggle" title="Calibración y Ajustes">
-                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-                        <circle cx="12" cy="12" r="3"/>
-                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-                    </svg>
-                </button>
-
-                <!-- Consola de Diagnóstico / Debug -->
-                <button class="btn-icon" id="btn-debug-toggle" title="Panel de Debug (Tecla D)">
-                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-                        <path d="M4 17l6-6-6-6m8 14h8"/>
-                    </svg>
-                </button>
-
-                <!-- Pantalla Completa -->
-                <button class="btn-icon" id="btn-fullscreen" title="Pantalla Completa (F)">
-                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-                        <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
-                    </svg>
-                </button>
+            <div class="brand-title-centered">
+                Paisajes Andinos - Experiencia Inmersiva Reactiva en Tiempo Real (Render) - Elián Reinoso
             </div>
         </header>
 
-        <!-- WIDGET BRÚJULA MULTIEJE REESTRUCTURADA (PÚAS TRIANGULARES) -->
-        <div class="orientation-widget" id="orientation-widget" title="Hacé clic para reorientar al ángulo de inicio">
-            <div class="compass-multi-axis">
-                <div class="axis-ring ring-outer"></div>
-                <div class="axis-ring ring-middle"></div>
-                <div class="axis-ring ring-inner"></div>
-                <!-- Agujas triangulares de los 2 ejes -->
-                <div class="needle-triangle needle-north" id="needle-north"></div>
-                <div class="needle-triangle needle-south" id="needle-south"></div>
-                <div class="needle-triangle needle-east" id="needle-east"></div>
-                <div class="needle-triangle needle-west" id="needle-west"></div>
-                <div class="compass-center-core"></div>
+        <!-- WIDGET ESFERA 360° DE NAVEGACIÓN Y RESETEO -->
+        <div class="sphere-nav-widget" id="orientation-widget" title="Esfera de orientación 360° (Clic para volver a la posición de origen)">
+            <div class="sphere-globe">
+                <!-- Anillos ortogonales de la esfera -->
+                <div class="sphere-ring ring-equator" id="sphere-equator"></div>
+                <div class="sphere-ring ring-meridian" id="sphere-meridian"></div>
+                <div class="sphere-ring ring-latitude" id="sphere-latitude"></div>
+                
+                <!-- Marcador de Origen / Reseteo fijo (punto inicial) -->
+                <div class="sphere-marker origin-marker" id="marker-origin" title="Punto de origen"></div>
+                
+                <!-- Marcador de Vista Actual en tiempo real -->
+                <div class="sphere-marker current-marker" id="marker-current" title="Punto de vista actual"></div>
             </div>
         </div>
 
-        <!-- BARRA INFERIOR / REPRODUCTOR REORGANIZADO -->
+        <!-- BARRA INFERIOR / REPRODUCTOR -->
         <footer class="bottom-bar glass-panel" id="bottom-bar">
             
             <!-- 1. IZQUIERDA: Play / Pausa + Stop -->
@@ -149,7 +103,7 @@
                 <span class="time-label" id="time-total">03:38</span>
             </div>
 
-            <!-- 3. DERECHA: Volumen Vertical + Fullscreen -->
+            <!-- 3. DERECHA: Volumen Vertical + Captura de Pantalla + Fullscreen -->
             <div class="bar-section right-controls">
                 
                 <!-- Contenedor de Volumen con Slider Vertical Flotante -->
@@ -173,12 +127,15 @@
                     </div>
                 </div>
 
-                <!-- Botón Alternar Proyección Fisheye / Equirectangular -->
-                <button class="btn-pill-mode" id="btn-projection-toggle" title="Cambiar Proyección">
-                    <span>Fisheye</span>
+                <!-- Botón Captura de Pantalla (ubicado entre volumen y fullscreen) -->
+                <button class="btn-control-sub" id="btn-snapshot-bottom" title="Capturar Pantalla">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                        <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
+                        <circle cx="12" cy="13" r="4"/>
+                    </svg>
                 </button>
 
-                <!-- Pantalla Completa Inferior -->
+                <!-- Pantalla Completa -->
                 <button class="btn-control-sub" id="btn-fullscreen-bottom" title="Pantalla Completa (F)">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                         <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
@@ -190,7 +147,7 @@
 
     </div>
 
-    <!-- PANEL DE DIAGNÓSTICO Y DEBUG EN PANTALLA -->
+    <!-- PANEL DE DIAGNÓSTICO Y DEBUG (ABRIBLE CON TECLA D) -->
     <div class="debug-panel glass-panel hidden" id="debug-panel">
         <div class="debug-header">
             <h4>
@@ -237,9 +194,8 @@
         <div class="debug-actions">
             <button class="btn-debug-act" id="dbg-btn-play">▶ Forzar Play</button>
             <button class="btn-debug-act" id="dbg-btn-next">⏭ Siguiente Seg</button>
-            <button class="btn-debug-act" id="dbg-btn-proj">🔄 Fisheye / 360</button>
             <button class="btn-debug-act" id="dbg-btn-pip">👁 Mini Preview Video</button>
-            <button class="btn-debug-act" id="dbg-btn-copy" style="grid-column: span 2;">📋 Copiar Reporte</button>
+            <button class="btn-debug-act" id="dbg-btn-copy">📋 Copiar Reporte</button>
         </div>
 
         <div class="debug-pip-container hidden" id="debug-pip-container">
@@ -252,88 +208,6 @@
             <div class="debug-log" id="debug-log"></div>
         </div>
     </div>
-
-    <!-- PANEL LATERAL DE CALIBRACIÓN DEL DOMO -->
-    <aside class="settings-drawer glass-panel" id="settings-drawer">
-        <div class="drawer-header">
-            <h3>
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-                    <circle cx="12" cy="12" r="3"/>
-                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-                </svg>
-                Calibración de Proyección
-            </h3>
-            <button class="btn-icon" id="btn-close-settings" style="width: 32px; height: 32px;">✕</button>
-        </div>
-
-        <div class="setting-item">
-            <div class="setting-label">
-                <span>Cobertura Domo (FOV)</span>
-                <span class="setting-value" id="lbl-dome-fov">180°</span>
-            </div>
-            <input type="range" class="custom-slider" id="slider-dome-fov" min="90" max="240" step="1" value="180">
-        </div>
-
-        <div class="setting-item">
-            <div class="setting-label">
-                <span>Escala Óptica (Zoom)</span>
-                <span class="setting-value" id="lbl-scale">1.00x</span>
-            </div>
-            <input type="range" class="custom-slider" id="slider-scale" min="0.5" max="2.0" step="0.01" value="1.0">
-        </div>
-
-        <div class="setting-item">
-            <div class="setting-label">
-                <span>Desplazamiento X</span>
-                <span class="setting-value" id="lbl-offset-x">0.00</span>
-            </div>
-            <input type="range" class="custom-slider" id="slider-offset-x" min="-0.5" max="0.5" step="0.005" value="0.0">
-        </div>
-
-        <div class="setting-item">
-            <div class="setting-label">
-                <span>Desplazamiento Y</span>
-                <span class="setting-value" id="lbl-offset-y">0.00</span>
-            </div>
-            <input type="range" class="custom-slider" id="slider-offset-y" min="-0.5" max="0.5" step="0.005" value="0.0">
-        </div>
-
-        <div class="setting-item">
-            <div class="setting-label">
-                <span>Rotación Azimutal</span>
-                <span class="setting-value" id="lbl-rotation">0°</span>
-            </div>
-            <input type="range" class="custom-slider" id="slider-rotation" min="0" max="360" step="1" value="0">
-        </div>
-
-        <div class="setting-item">
-            <div class="setting-label">
-                <span>Brillo / Exposición</span>
-                <span class="setting-value" id="lbl-exposure">1.00x</span>
-            </div>
-            <input type="range" class="custom-slider" id="slider-exposure" min="0.2" max="3.0" step="0.05" value="1.0">
-        </div>
-
-        <div class="toggle-group">
-            <span>Espejar Horizontal (Flip X)</span>
-            <label class="switch">
-                <input type="checkbox" id="chk-flip-x">
-                <span class="slider-toggle"></span>
-            </label>
-        </div>
-
-        <div class="toggle-group">
-            <span>Espejar Vertical (Flip Y)</span>
-            <label class="switch">
-                <input type="checkbox" id="chk-flip-y">
-                <span class="slider-toggle"></span>
-            </label>
-        </div>
-
-        <button class="btn-secondary" id="btn-reset-calibration" style="width: 100%; justify-content: center; margin-top: 0.5rem;">
-            Restablecer Valores por Defecto
-        </button>
-    </aside>
 
     <!-- ====================================================================
          1. MODAL DE ADVERTENCIA DE DATOS MÓVILES (PUERTA DE ENTRADA CON CERO DESCARGAS)
@@ -349,7 +223,7 @@
                 </svg>
             </div>
             <h3>Aviso antes de entrar</h3>
-            <p>Esta página carga contenido <strong>4K</strong> de alta definición, recomendado que actives el <strong>Wi-Fi</strong>.</p>
+            <p>Esta página carga contenido <strong>4K</strong>, recomendado que actives el <strong>Wi-Fi</strong>.</p>
             
             <div class="warning-actions">
                 <button class="btn-frosted-primary" id="btn-data-continue">
@@ -373,10 +247,11 @@
 
         <div class="splash-card glass-card">
             
-            <div class="splash-badge">VISOR FULLDOME 360°</div>
+            <div class="splash-badge">Paisajes Andinos, Elián.</div>
             
             <div class="splash-description">
-                Experiencia Inmersiva Reactiva en Tiempo Real (Render) con imagenes inspiradas en los paisajes Andinos de la Patagonia Argentina. Experiencia trabajada con programación utilizando herramientas como Processing, GLSL, OpenCV, Antigravity, Gemini, Sistema de decodificación/fragmentación sonora, código por instancias vivo que muta organicamente sin reactividad lineal.
+                Inspirado en imagenes de los paisajes andinos de la Patagonia Argentina, desarrollo esta Experiencia Inmersiva Reactiva en Tiempo Real (Render) .<br><br>
+                Utilizando herramientas como Processing, GLSL, OpenCV, Antigravity, Gemini. Y tecnicas de decodificación/fragmentación sonora generando un código por instancias vivo que muta organicamente sin reactividad lineal. Desplazando pixeles y fusionandolos en distintas capas con distintos modos de fusion.
             </div>
 
             <div class="splash-signature">
