@@ -304,74 +304,62 @@ class DomeViewer {
     }
 
     /* --------------------------------------------------------------------------
-       GIROSCOPIO / SENSOR DE MOVIMIENTO MULTI-API (ANDROID & IOS)
+       MOTOR DE MOVIMIENTO POR SENSORES (ACELERÓMETRO + BRÚJULA - SENSOR FUSION)
+       Compatible con todos los celulares (incluidos Moto G con Acelerómetro)
        -------------------------------------------------------------------------- */
     toggleGyro() {
         if (this.gyroActive) {
             this.stopGyro();
-            this.showToast('Giroscopio desactivado');
+            this.showToast('Sensor de movimiento desactivado');
             return;
         }
 
         this.gyroInitialOrientation = null;
         this.gyroStartCamera = null;
 
-        // 1. Intentar permiso en iOS 13+
+        // Permisos en iOS 13+ si fuera necesario
         if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
             DeviceOrientationEvent.requestPermission()
                 .then(state => {
                     if (state === 'granted') {
-                        this.startDeviceOrientationFallback();
+                        this.startMotionSensors();
                     } else {
-                        this.showToast('Permiso de giroscopio no concedido');
+                        this.showToast('Permiso de sensores denegado');
                     }
                 })
-                .catch(() => this.showToast('Error accediendo a giroscopio'));
-        } 
-        // 2. Intentar Generic Sensor API en Android (Chrome/Brave)
-        else if ('AbsoluteOrientationSensor' in window || 'RelativeOrientationSensor' in window) {
-            try {
-                const SensorClass = window.RelativeOrientationSensor || window.AbsoluteOrientationSensor;
-                this.gyroSensor = new SensorClass({ frequency: 60 });
-                this.gyroSensor.addEventListener('reading', () => this.onSensorReading());
-                this.gyroSensor.addEventListener('error', () => {
-                    this.gyroSensor.stop();
-                    this.gyroSensor = null;
-                    this.startDeviceOrientationFallback();
-                });
-                this.gyroSensor.start();
-                this.onGyroStarted('Giroscopio (Sensor API 60Hz)');
-            } catch (err) {
-                this.startDeviceOrientationFallback();
-            }
-        } 
-        // 3. Fallback estándar DeviceOrientationEvent
-        else {
-            this.startDeviceOrientationFallback();
+                .catch(() => this.showToast('Error accediendo a sensores'));
+        } else {
+            this.startMotionSensors();
         }
     }
 
-    startDeviceOrientationFallback() {
+    startMotionSensors() {
+        this.gyroActive = true;
+        this.gyroInitialOrientation = null;
+        this.gyroStartCamera = null;
+
+        // 1. Escuchar Acelerómetro (Gravedad física de 3 ejes - siempre presente en Moto G)
+        this.handleDeviceMotion = (e) => this.onDeviceMotion(e);
+        window.addEventListener('devicemotion', this.handleDeviceMotion);
+
+        // 2. Escuchar Orientación / Brújula (para giro 360 horizontal)
         this.handleDeviceOrientation = (e) => this.onDeviceOrientation(e);
         window.addEventListener('deviceorientationabsolute', this.handleDeviceOrientation);
         window.addEventListener('deviceorientation', this.handleDeviceOrientation);
-        this.onGyroStarted('Giroscopio activado 📱');
-    }
 
-    onGyroStarted(label) {
-        this.gyroActive = true;
         const btnGyro = document.getElementById('btn-gyro');
         if (btnGyro) btnGyro.classList.add('active');
+
         const dbgGyro = document.getElementById('dbg-gyro');
-        if (dbgGyro) dbgGyro.textContent = 'Activo';
-        this.showToast(`${label}: Movete con tu teléfono`, 3500);
+        if (dbgGyro) dbgGyro.textContent = 'Activo (Acelerómetro + Brújula)';
+
+        this.showToast('Sensor de movimiento activado: Movete con el celu 📱', 4000);
     }
 
     stopGyro() {
         this.gyroActive = false;
-        if (this.gyroSensor) {
-            try { this.gyroSensor.stop(); } catch(e) {}
-            this.gyroSensor = null;
+        if (this.handleDeviceMotion) {
+            window.removeEventListener('devicemotion', this.handleDeviceMotion);
         }
         if (this.handleDeviceOrientation) {
             window.removeEventListener('deviceorientationabsolute', this.handleDeviceOrientation);
@@ -383,61 +371,61 @@ class DomeViewer {
         if (dbgGyro) dbgGyro.textContent = 'Inactivo';
     }
 
-    onSensorReading() {
-        if (!this.gyroActive || !this.gyroSensor || !this.gyroSensor.quaternion) return;
+    // Acelerómetro físico (detecta inclinación y gravedad en tiempo real)
+    onDeviceMotion(e) {
+        if (!this.gyroActive || !e.accelerationIncludingGravity) return;
 
-        // Convertir cuaternión a Euler (Yaw y Pitch)
-        const q = this.gyroSensor.quaternion;
-        const qObj = new THREE.Quaternion(q[0], q[1], q[2], q[3]);
-        const euler = new THREE.Euler().setFromQuaternion(qObj, 'YXZ');
-
-        const pitchDeg = THREE.MathUtils.radToDeg(euler.x);
-        const yawDeg = THREE.MathUtils.radToDeg(euler.y);
-
-        if (this.gyroInitialOrientation === null) {
-            this.gyroInitialOrientation = { pitch: pitchDeg, yaw: yawDeg };
-            this.gyroStartCamera = { pitch: this.pitch, yaw: this.yaw };
-        }
-
-        const deltaPitch = pitchDeg - this.gyroInitialOrientation.pitch;
-        const deltaYaw = yawDeg - this.gyroInitialOrientation.yaw;
-
-        this.targetPitch = Math.max(-89.9, Math.min(89.9, this.gyroStartCamera.pitch - deltaPitch));
-        this.targetYaw = this.gyroStartCamera.yaw - deltaYaw;
-    }
-
-    onDeviceOrientation(e) {
-        if (!this.gyroActive) return;
-        if (e.beta === null && e.gamma === null && e.alpha === null) return;
+        const ag = e.accelerationIncludingGravity;
+        const gx = ag.x || 0;
+        const gy = ag.y || 0;
+        const gz = ag.z || 0;
 
         const screenOrient = (window.screen && window.screen.orientation && window.screen.orientation.angle !== undefined)
             ? window.screen.orientation.angle
             : (window.orientation || 0);
 
-        let pitchVal = e.beta || 0;
-        let yawVal = e.alpha || 0;
+        // Calcular ángulo de inclinación respecto a la gravedad
+        let pitchRad = 0;
+        let rollRad = 0;
 
         if (screenOrient === 90) {
-            pitchVal = -(e.gamma || 0);
-            yawVal = (e.alpha || 0) + 90;
+            // Landscape horizontal
+            pitchRad = Math.atan2(gx, Math.sqrt(gy * gy + gz * gz));
+            rollRad = Math.atan2(gy, gz);
         } else if (screenOrient === -90 || screenOrient === 270) {
-            pitchVal = (e.gamma || 0);
-            yawVal = (e.alpha || 0) - 90;
+            pitchRad = Math.atan2(-gx, Math.sqrt(gy * gy + gz * gz));
+            rollRad = Math.atan2(-gy, gz);
         } else {
-            pitchVal = (e.beta || 0) - 45;
-            yawVal = -(e.alpha || 0);
+            // Portrait vertical
+            pitchRad = Math.atan2(gy, Math.sqrt(gx * gx + gz * gz));
+            rollRad = Math.atan2(gx, gz);
         }
 
+        const pitchDeg = pitchRad * (180 / Math.PI);
+
         if (this.gyroInitialOrientation === null) {
-            this.gyroInitialOrientation = { pitch: pitchVal, yaw: yawVal };
+            this.gyroInitialOrientation = { pitch: pitchDeg, yaw: this.yaw };
             this.gyroStartCamera = { pitch: this.pitch, yaw: this.yaw };
         }
 
-        const deltaPitch = pitchVal - this.gyroInitialOrientation.pitch;
-        const deltaYaw = yawVal - this.gyroInitialOrientation.yaw;
+        const deltaPitch = pitchDeg - this.gyroInitialOrientation.pitch;
+        this.targetPitch = Math.max(-89.9, Math.min(89.9, this.gyroStartCamera.pitch + deltaPitch * 1.3));
+    }
 
-        this.targetPitch = Math.max(-89.9, Math.min(89.9, this.gyroStartCamera.pitch - deltaPitch));
-        this.targetYaw = this.gyroStartCamera.yaw + deltaYaw;
+    // Brújula / Orientación (detecta rotación azimutal 360°)
+    onDeviceOrientation(e) {
+        if (!this.gyroActive) return;
+        const yawVal = (e.alpha !== null && e.alpha !== undefined) ? e.alpha : e.webkitCompassHeading;
+        if (yawVal === null || yawVal === undefined) return;
+
+        if (this.gyroInitialOrientation && this.gyroInitialOrientation.compassYaw === undefined) {
+            this.gyroInitialOrientation.compassYaw = yawVal;
+        }
+
+        if (this.gyroInitialOrientation && this.gyroInitialOrientation.compassYaw !== undefined) {
+            const deltaYaw = yawVal - this.gyroInitialOrientation.compassYaw;
+            this.targetYaw = this.gyroStartCamera.yaw - deltaYaw;
+        }
     }
 
     /* --------------------------------------------------------------------------
