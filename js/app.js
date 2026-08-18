@@ -124,10 +124,7 @@ class DomeViewer {
         this.renderer.toneMappingExposure = 1.0;
         this.container.appendChild(this.renderer.domElement);
 
-        // 4. Texturas para Doble Búfer (Video A y Video B con CORS para WebGL)
-        this.videoA.crossOrigin = 'anonymous';
-        this.videoB.crossOrigin = 'anonymous';
-
+        // 4. Texturas para Doble Búfer (Video A y Video B)
         this.textureA = new THREE.VideoTexture(this.videoA);
         this.textureA.minFilter = THREE.LinearFilter;
         this.textureA.magFilter = THREE.LinearFilter;
