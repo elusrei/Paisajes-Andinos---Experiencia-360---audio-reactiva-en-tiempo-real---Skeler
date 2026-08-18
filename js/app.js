@@ -166,7 +166,10 @@ class DomeViewer {
         if (this.manifestLoaded) return;
         this.manifestLoaded = true;
 
-        fetch('segments/manifest.json')
+        const manifestUrl = this.isMobile ? 'segments_mobile/manifest.json' : 'segments/manifest.json';
+        this.logDebug(`Seleccionado stream: ${this.isMobile ? 'Mobile 2K (Alta Fluidez)' : 'Desktop 4K Master'}`, 'info');
+
+        fetch(manifestUrl)
             .then(res => res.json())
             .then(data => {
                 if (Array.isArray(data) && data.length > 0) {
@@ -176,11 +179,11 @@ class DomeViewer {
                     }));
                     this.totalDuration = this.segments[this.segments.length - 1].end;
                     this.updateTotalDuration();
-                    this.logDebug(`Manifest cargado: ${this.segments.length} segmentos`, 'info');
+                    this.logDebug(`Manifest cargado: ${this.segments.length} segmentos (${this.isMobile ? '2K' : '4K'})`, 'info');
                 }
             })
             .catch(() => {
-                this.logDebug(`Uso de manifest predeterminado (${this.segments.length} segmentos)`, 'info');
+                this.logDebug(`Uso de manifest por defecto (${this.segments.length} segmentos)`, 'info');
             });
     }
 
@@ -300,6 +303,7 @@ class DomeViewer {
     toggleGyro() {
         if (this.gyroActive) {
             this.gyroActive = false;
+            window.removeEventListener('deviceorientationabsolute', this.handleDeviceOrientation);
             window.removeEventListener('deviceorientation', this.handleDeviceOrientation);
             const btnGyro = document.getElementById('btn-gyro');
             if (btnGyro) btnGyro.classList.remove('active');
@@ -319,10 +323,10 @@ class DomeViewer {
                         this.showToast('Permiso de giroscopio denegado');
                     }
                 })
-                .catch(err => {
+                .catch(() => {
                     this.showToast('Error accediendo a giroscopio');
                 });
-        } else if ('DeviceOrientationEvent' in window) {
+        } else if ('DeviceOrientationEvent' in window || 'ondeviceorientationabsolute' in window) {
             this.startGyroListener();
         } else {
             this.showToast('Sensor de movimiento no disponible en este dispositivo');
@@ -333,6 +337,8 @@ class DomeViewer {
         this.gyroActive = true;
         this.gyroBaseAlpha = null;
         this.handleDeviceOrientation = (e) => this.onDeviceOrientation(e);
+
+        window.addEventListener('deviceorientationabsolute', this.handleDeviceOrientation);
         window.addEventListener('deviceorientation', this.handleDeviceOrientation);
 
         const btnGyro = document.getElementById('btn-gyro');
@@ -345,19 +351,25 @@ class DomeViewer {
     }
 
     onDeviceOrientation(e) {
-        if (!this.gyroActive || e.beta === null) return;
+        if (!this.gyroActive) return;
+        if (e.beta === null && e.gamma === null && e.alpha === null) return;
 
-        // Orientación de pantalla (horizontal vs vertical)
-        const orient = window.orientation || 0;
-        let pitchVal = e.beta;
+        const screenOrient = (window.screen && window.screen.orientation && window.screen.orientation.angle !== undefined)
+            ? window.screen.orientation.angle
+            : (window.orientation || 0);
+
+        let pitchVal = e.beta || 0;
         let yawVal = e.alpha || 0;
 
-        if (orient === 90) {
-            pitchVal = -e.gamma;
-            yawVal = e.alpha + 90;
-        } else if (orient === -90) {
-            pitchVal = e.gamma;
-            yawVal = e.alpha - 90;
+        if (screenOrient === 90) {
+            pitchVal = -(e.gamma || 0);
+            yawVal = (e.alpha || 0) + 90;
+        } else if (screenOrient === -90 || screenOrient === 270) {
+            pitchVal = (e.gamma || 0);
+            yawVal = (e.alpha || 0) - 90;
+        } else {
+            pitchVal = (e.beta || 0) - 35; // Offset cómodo para sostener el celular
+            yawVal = -(e.alpha || 0);
         }
 
         if (this.gyroBaseAlpha === null) {
