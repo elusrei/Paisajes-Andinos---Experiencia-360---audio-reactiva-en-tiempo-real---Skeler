@@ -523,6 +523,21 @@ class DomeViewer {
             });
         }
 
+        const dbgProj = document.getElementById('dbg-btn-proj');
+        if (dbgProj) {
+            dbgProj.addEventListener('click', () => {
+                this.config.projectionMode = this.config.projectionMode === 0 ? 1 : 0;
+                this.domeMaterial.uniforms.uProjectionMode.value = this.config.projectionMode;
+                const label = this.config.projectionMode === 0 ? 'Fisheye Fulldome' : 'Equirectangular 360';
+                this.logDebug(`Modo cambiado a: ${label}`, 'info');
+                this.showToast(`Proyección: ${label}`);
+                const span = document.querySelector('#btn-projection-toggle span');
+                if (span) span.textContent = this.config.projectionMode === 0 ? 'Fisheye' : 'Equirectangular';
+                const badge = document.getElementById('projection-badge');
+                if (badge) badge.textContent = this.config.projectionMode === 0 ? 'FULLDOME 180°' : 'ESFERA 360°';
+            });
+        }
+
         const dbgPip = document.getElementById('dbg-btn-pip');
         if (dbgPip) {
             dbgPip.addEventListener('click', () => {
