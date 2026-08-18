@@ -164,18 +164,18 @@ class DomeViewer {
 
         // 5. Material con Shader Fulldome
         const uniforms = THREE.UniformsUtils.clone(DomeShader.uniforms);
-        uniforms.tVideo.value = this.activeTexture;
-        uniforms.uAspect.value = 1.0;
-        uniforms.uDomeFov.value = (this.config.domeFov * Math.PI) / 180;
-        uniforms.uScale.value = this.config.scale;
-        uniforms.uOffsetX.value = this.config.offsetX;
-        uniforms.uOffsetY.value = this.config.offsetY;
-        uniforms.uRotation.value = (this.config.rotation * Math.PI) / 180;
-        uniforms.uFlipX.value = this.config.flipX;
-        uniforms.uFlipY.value = this.config.flipY;
-        uniforms.uProjectionMode.value = this.config.projectionMode;
-        uniforms.uExposure.value = this.config.exposure;
-        uniforms.uHemisphereOnly.value = this.config.hemisphereOnly ? 1.0 : 0.0;
+        if (uniforms.tVideo) uniforms.tVideo.value = this.activeTexture;
+        if (uniforms.uAspect) uniforms.uAspect.value = 1.0;
+        if (uniforms.uDomeFov) uniforms.uDomeFov.value = (this.config.domeFov * Math.PI) / 180;
+        if (uniforms.uScale) uniforms.uScale.value = this.config.scale;
+        if (uniforms.uOffsetX) uniforms.uOffsetX.value = this.config.offsetX;
+        if (uniforms.uOffsetY) uniforms.uOffsetY.value = this.config.offsetY;
+        if (uniforms.uRotation) uniforms.uRotation.value = (this.config.rotation * Math.PI) / 180;
+        if (uniforms.uFlipX) uniforms.uFlipX.value = this.config.flipX;
+        if (uniforms.uFlipY) uniforms.uFlipY.value = this.config.flipY;
+        if (uniforms.uProjectionMode) uniforms.uProjectionMode.value = this.config.projectionMode;
+        if (uniforms.uExposure) uniforms.uExposure.value = this.config.exposure;
+        if (uniforms.uHemisphereOnly) uniforms.uHemisphereOnly.value = this.config.hemisphereOnly ? 1.0 : 0.0;
 
         this.domeMaterial = new THREE.ShaderMaterial({
             uniforms: uniforms,

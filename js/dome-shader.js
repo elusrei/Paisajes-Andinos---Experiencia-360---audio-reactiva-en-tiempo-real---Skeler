@@ -15,7 +15,8 @@ const DomeShader = {
         uFlipX: { value: false },
         uFlipY: { value: false },
         uProjectionMode: { value: 0 },    // 0: Fisheye Fulldome, 1: Equirectangular 360
-        uExposure: { value: 1.0 }
+        uExposure: { value: 1.0 },
+        uHemisphereOnly: { value: 0.0 }
     },
 
     vertexShader: `
