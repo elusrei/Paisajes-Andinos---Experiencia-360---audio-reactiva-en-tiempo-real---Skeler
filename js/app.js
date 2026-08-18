@@ -1263,9 +1263,11 @@ ${this.debugLogs.map(l => `[${l.time}] [${l.type}] ${l.message}`).join('\n')}
             this.updateDebugPanel();
         }
 
-        // 1. Forzar actualización continua de textura de video en WebGL
-        if (this.activeTexture) {
-            this.activeTexture.needsUpdate = true;
+        // 1. Actualizar textura de video en WebGL SOLO cuando hay fotogramas listos
+        if (this.activeVideo && this.activeVideo.readyState >= 2) {
+            if (this.activeTexture) {
+                this.activeTexture.needsUpdate = true;
+            }
         }
         if (this.domeMaterial && this.domeMaterial.uniforms && this.domeMaterial.uniforms.tVideo) {
             this.domeMaterial.uniforms.tVideo.value = this.activeTexture;
