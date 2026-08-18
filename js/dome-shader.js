@@ -6,7 +6,7 @@
 const DomeShader = {
     uniforms: {
         tVideo: { value: null },
-        uAspect: { value: 16 / 9 },       // Relación de aspecto del video (ancho / alto)
+        uAspect: { value: 1.0 },          // Relación de aspecto del video (ancho / alto)
         uDomeFov: { value: Math.PI },     // Ángulo total del domo (180° = PI rad, 220° = 1.22 * PI)
         uScale: { value: 1.0 },           // Escala / Zoom del círculo fisheye
         uOffsetX: { value: 0.0 },         // Desplazamiento horizontal del centro óptico
@@ -15,9 +15,9 @@ const DomeShader = {
         uFlipX: { value: false },         // Invertir horizontalmente
         uFlipY: { value: false },         // Invertir verticalmente
         uProjectionMode: { value: 0 },    // 0: Fisheye Fulldome, 1: Equirectangular 360
-        uFadeHorizon: { value: 0.05 },    // Suavizado en el borde del horizonte
+        uFadeHorizon: { value: 0.08 },    // Suavizado en el borde del horizonte
         uExposure: { value: 1.0 },        // Exposición / Brillo
-        uHemisphereOnly: { value: 1.0 }   // 1.0: Semiesfera superior, 0.0: Esfera completa
+        uHemisphereOnly: { value: 0.0 }   // 1.0: Semiesfera superior, 0.0: Esfera completa
     },
 
     vertexShader: `
@@ -57,11 +57,10 @@ const DomeShader = {
             // Dirección normalizada desde el centro (0,0,0) hacia la superficie interior
             vec3 dir = normalize(vWorldPosition);
 
-            // Si está configurado solo semiesfera y estamos bajo el horizonte, opacar o pintar piso
-            if (uHemisphereOnly > 0.5 && dir.y < -0.01) {
-                // Piso sutil con rejilla planetario
+            // Si está configurado solo semiesfera y estamos bajo el horizonte, piso sutil
+            if (uHemisphereOnly > 0.5 && dir.y < -0.05) {
                 float grid = step(0.95, fract(dir.x * 8.0)) + step(0.95, fract(dir.z * 8.0));
-                gl_FragColor = vec4(vec3(0.03) + vec3(0.01, 0.04, 0.06) * grid, 1.0);
+                gl_FragColor = vec4(vec3(0.04) + vec3(0.01, 0.04, 0.06) * grid, 1.0);
                 return;
             }
 
@@ -77,17 +76,10 @@ const DomeShader = {
                 float phi = atan(dir.z, dir.x) + uRotation;
 
                 // Radio normalizado en el domo (1.0 = borde del domo según uDomeFov)
-                float maxAngle = uDomeFov * 0.5;
+                float maxAngle = max(0.001, uDomeFov * 0.5);
                 float rho = theta / maxAngle;
 
-                // Fuera del ángulo de cobertura del domo
-                if (rho > 1.0 + uFadeHorizon) {
-                    gl_FragColor = vec4(0.01, 0.02, 0.03, 1.0);
-                    return;
-                }
-
                 // Convertir coordenadas polares (rho, phi) a coordenadas UV cartesianas
-                // En un video 16:9 con ojo de pez centrado, el diámetro circular llena la altura (alto = 1.0)
                 float uComp = (uAspect > 1.0) ? (1.0 / uAspect) : 1.0;
                 float vComp = (uAspect < 1.0) ? uAspect : 1.0;
 
@@ -99,25 +91,26 @@ const DomeShader = {
 
                 uv = vec2(uCoord, vCoord);
 
-                // Muestrear video
+                // Si está fuera de los límites de la textura de video
                 if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) {
-                    gl_FragColor = vec4(0.01, 0.02, 0.03, 1.0);
+                    gl_FragColor = vec4(0.02, 0.03, 0.05, 1.0);
                     return;
                 }
 
-                vec4 color = texture2D(tVideo, uv);
+                vec4 sampledColor = texture2D(tVideo, uv);
+                vec3 finalRgb = sampledColor.rgb * uExposure;
 
-                // Suavizado en el horizonte
+                // Suavizado elegante si se pasa del ángulo de domo
                 if (rho > 1.0) {
                     float fade = 1.0 - smoothstep(1.0, 1.0 + uFadeHorizon, rho);
-                    color.rgb *= fade;
+                    finalRgb *= fade;
                 }
 
-                color.rgb *= uExposure;
-                gl_FragColor = color;
+                // SIEMPRE FORZAR ALPHA = 1.0 para evitar transparencia invisible
+                gl_FragColor = vec4(finalRgb, 1.0);
 
             } else {
-                // MODO 1: EQUIRECTANGULAR 360 TRADICIONAL (Lat-Long)
+                // MODO 1: EQUIRECTANGULAR 360 TRADICIONAL (Lat-Long Esférico)
                 float phi = atan(dir.z, dir.x) + uRotation;
                 float theta = acos(clamp(dir.y, -1.0, 1.0));
 
@@ -128,8 +121,10 @@ const DomeShader = {
                 if (uFlipY) vCoord = 1.0 - vCoord;
 
                 uv = vec2(fract(uCoord + uOffsetX), clamp(vCoord + uOffsetY, 0.0, 1.0));
-                vec4 color = texture2D(tVideo, uv) * uExposure;
-                gl_FragColor = color;
+                vec4 sampledColor = texture2D(tVideo, uv);
+
+                // SIEMPRE FORZAR ALPHA = 1.0
+                gl_FragColor = vec4(sampledColor.rgb * uExposure, 1.0);
             }
         }
     `

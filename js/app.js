@@ -181,7 +181,10 @@ class DomeViewer {
             uniforms: uniforms,
             vertexShader: DomeShader.vertexShader,
             fragmentShader: DomeShader.fragmentShader,
-            side: THREE.BackSide
+            side: THREE.BackSide,
+            transparent: false,
+            depthWrite: false,
+            depthTest: false
         });
 
         // 6. Geometría de Domo / Esfera
