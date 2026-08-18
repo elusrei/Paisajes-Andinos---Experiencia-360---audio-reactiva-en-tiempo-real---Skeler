@@ -15,7 +15,7 @@
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 
     <!-- Estilos -->
-    <link rel="stylesheet" href="css/style.css?v=2.5">
+    <link rel="stylesheet" href="css/style.css?v=2.6">
 
     <!-- Three.js CDN -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
@@ -106,7 +106,7 @@
                 <span class="time-label" id="time-total">03:38</span>
             </div>
 
-            <!-- 3. DERECHA: Volumen + Giroscopio + Captura + Fullscreen -->
+            <!-- 3. DERECHA: Volumen + Giroscopio + Monitor Sensores + Captura + Fullscreen -->
             <div class="bar-section right-controls">
                 
                 <!-- Contenedor de Volumen con Slider Vertical Flotante -->
@@ -131,11 +131,18 @@
                 </div>
 
                 <!-- Botón Giroscopio / Sensor de Movimiento Celular -->
-                <button class="btn-control-sub" id="btn-gyro" title="Giroscopio (Mover el teléfono)">
+                <button class="btn-control-sub" id="btn-gyro" title="Activar Sensor de Movimiento (📱)">
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                         <rect x="5" y="2" width="14" height="20" rx="3"/>
                         <circle cx="12" cy="18" r="1"/>
                         <path d="M10 6h4"/>
+                    </svg>
+                </button>
+
+                <!-- Botón Monitor de Sensores en Pantalla -->
+                <button class="btn-control-sub" id="btn-open-sensor-dbg" title="Monitor de Sensores en Vivo">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                        <path d="M12 2v20M2 12h20M4.93 4.93l14.14 14.14M4.93 19.07l14.14-14.14"/>
                     </svg>
                 </button>
 
@@ -159,6 +166,40 @@
 
     </div>
 
+    <!-- ====================================================================
+         MONITOR Y TESTEADOR DE SENSORES EN VIVO (4 TÉCNICAS INTERCAMBIABLES)
+         ==================================================================== -->
+    <div class="sensor-debug-overlay hidden" id="sensor-debug-overlay">
+        <div class="sensor-debug-card glass-panel">
+            <div class="sensor-debug-header">
+                <h4>🔬 MONITOR DE SENSORES EN VIVO</h4>
+                <button class="btn-icon-sm" id="btn-close-sensor-dbg">✕</button>
+            </div>
+
+            <div class="sensor-technique-selector">
+                <button class="btn-tech active" id="btn-tech-1" data-tech="1">T1: Orientation Sensor</button>
+                <button class="btn-tech" id="btn-tech-2" data-tech="2">T2: DeviceOrientation</button>
+                <button class="btn-tech" id="btn-tech-3" data-tech="3">T3: Accelerometer G</button>
+                <button class="btn-tech" id="btn-tech-4" data-tech="4">T4: Compass / Gravity</button>
+            </div>
+
+            <div class="sensor-live-readings">
+                <div class="reading-row"><span>Técnica Activa:</span><strong id="live-tech-name">T1: RelativeOrientationSensor</strong></div>
+                <div class="reading-row"><span>Frecuencia / Ticks:</span><strong id="live-events-sec">0 eventos/s</strong></div>
+                <div class="reading-row"><span>Alpha / Compass (Yaw):</span><strong id="live-alpha">--</strong></div>
+                <div class="reading-row"><span>Beta / Inclinación (Pitch):</span><strong id="live-beta">--</strong></div>
+                <div class="reading-row"><span>Gamma / Balanceo (Roll):</span><strong id="live-gamma">--</strong></div>
+                <div class="reading-row"><span>Acelerómetro G (x, y, z):</span><strong id="live-gravity">--</strong></div>
+                <div class="reading-row"><span>Cámara (Pitch, Yaw):</span><strong id="live-camera">0°, 0°</strong></div>
+            </div>
+
+            <div class="sensor-debug-footer">
+                <button class="btn-frosted-primary" id="btn-cycle-tech">Cambiar Técnica 🔄</button>
+                <button class="btn-frosted-secondary" id="btn-req-sensor-perm">Solicitar Permiso ⚡</button>
+            </div>
+        </div>
+    </div>
+
     <!-- AVISO DE ROTACIÓN DE PANTALLA EN MOBILE -->
     <div class="orientation-prompt hidden" id="orientation-prompt">
         <div class="orientation-prompt-card glass-card">
@@ -176,7 +217,7 @@
         </div>
     </div>
 
-    <!-- PANEL DE DIAGNÓSTICO Y DEBUG (TECLA D) -->
+    <!-- PANEL DE DIAGNÓSTICO GENERAL (TECLA D) -->
     <div class="debug-panel glass-panel hidden" id="debug-panel">
         <div class="debug-header">
             <h4>
@@ -309,7 +350,7 @@
     <div class="toast-container" id="toast-container"></div>
 
     <!-- Scripts de la Aplicación -->
-    <script src="js/dome-shader.js?v=2.5"></script>
-    <script src="js/app.js?v=2.5"></script>
+    <script src="js/dome-shader.js?v=2.6"></script>
+    <script src="js/app.js?v=2.6"></script>
 </body>
 </html>

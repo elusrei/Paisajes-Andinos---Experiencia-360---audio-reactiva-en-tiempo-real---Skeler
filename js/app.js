@@ -1,7 +1,7 @@
 /**
  * ==========================================================================
  * DOME 360° MASTER VIEWER - CONTROLADOR THREE.JS & REPRODUCTOR ADAPTATIVO
- * CON SENSORES DE GIROSCOPIO RELATIVO, STREAM DUAL 2K/4K Y HUD TOUCH MOBILE
+ * CON MONITOR EN VIVO Y 4 TÉCNICAS INTERCAMBIABLES DE SENSORES DE MOVIMIENTO
  * ==========================================================================
  */
 
@@ -37,7 +37,7 @@ const READY_STATE_MAP = [
 
 class DomeViewer {
     constructor() {
-        // Detección de Dispositivo Mobile
+        // Detección Mobile
         this.isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || ('ontouchstart' in window) || (window.innerWidth <= 768);
 
         // Elementos DOM
@@ -54,6 +54,7 @@ class DomeViewer {
         this.bufferingSpinner = document.getElementById('buffering-spinner');
         this.bufferingText = document.getElementById('buffering-text');
         this.debugPanel = document.getElementById('debug-panel');
+        this.sensorDebugOverlay = document.getElementById('sensor-debug-overlay');
         this.markerOrigin = document.getElementById('marker-origin');
         this.markerCurrent = document.getElementById('marker-current');
 
@@ -67,7 +68,7 @@ class DomeViewer {
         this.textureB = null;
         this.activeTexture = null;
 
-        // Estado del Motor de Segmentos (Doble Búfer Ping-Pong)
+        // Estado del Motor de Segmentos
         this.isSegmentedMode = true;
         this.segments = this.isMobile ? [...DEFAULT_SEGMENTS_MOBILE] : [...DEFAULT_SEGMENTS];
         this.currentSegmentIndex = 0;
@@ -95,8 +96,23 @@ class DomeViewer {
         this.touchStartDist = 0;
         this.damping = 0.08;
 
-        // Giroscopio / Sensor de Movimiento
+        // ====================================================================
+        // MOTOR DE SENSORES CON 4 TÉCNICAS INTERCAMBIABLES
+        // ====================================================================
         this.gyroActive = false;
+        this.activeSensorTech = 1; // 1: Sensor API, 2: DeviceOrientation, 3: Accelerometer G, 4: Compass/Gravity
+        this.sensorTicks = 0;
+        this.sensorTicksPerSec = 0;
+        this.lastSensorTickTime = performance.now();
+
+        // Datos en vivo para diagnóstico en pantalla
+        this.liveSensorData = {
+            alpha: null,
+            beta: null,
+            gamma: null,
+            gx: 0, gy: 0, gz: 0
+        };
+
         this.gyroSensor = null;
         this.gyroInitialOrientation = null;
         this.gyroStartCamera = null;
@@ -137,6 +153,7 @@ class DomeViewer {
         this.initEvents();
         this.initUI();
         this.initDebug();
+        this.initSensorDebugUI();
         this.initGatekeeper();
         this.initMobileOrientationCheck();
         this.animate();
@@ -191,12 +208,12 @@ class DomeViewer {
                 }
             })
             .catch(() => {
-                this.logDebug(`Uso de manifest local por defecto`, 'info');
+                this.logDebug(`Uso de manifest local`, 'info');
             });
     }
 
     /* --------------------------------------------------------------------------
-       INICIALIZACIÓN THREE.JS (OPTIMIZADA)
+       INICIALIZACIÓN THREE.JS
        -------------------------------------------------------------------------- */
     initThree() {
         this.scene = new THREE.Scene();
@@ -304,66 +321,84 @@ class DomeViewer {
     }
 
     /* --------------------------------------------------------------------------
-       MOTOR DE MOVIMIENTO POR SENSORES (ACELERÓMETRO + BRÚJULA - SENSOR FUSION)
-       Compatible con todos los celulares (incluidos Moto G con Acelerómetro)
+       SISTEMA MULTI-TÉCNICA DE SENSORES DE MOVIMIENTO (1, 2, 3, 4)
        -------------------------------------------------------------------------- */
+    setSensorTechnique(techId) {
+        this.activeSensorTech = techId;
+        this.gyroInitialOrientation = null;
+        this.gyroStartCamera = null;
+
+        // Actualizar UI de botones de técnicas
+        for (let i = 1; i <= 4; i++) {
+            const btn = document.getElementById(`btn-tech-${i}`);
+            if (btn) btn.classList.toggle('active', i === techId);
+        }
+
+        const names = [
+            'T1: Generic Sensor API (Quaternions)',
+            'T2: DeviceOrientation (Alpha/Beta/Gamma)',
+            'T3: Pure Accelerometer Gravity (G-Vector)',
+            'T4: Compass Heading + Gyro Fusion'
+        ];
+        const techNameEl = document.getElementById('live-tech-name');
+        if (techNameEl) techNameEl.textContent = names[techId - 1];
+
+        this.logDebug(`Cambiando a técnica de sensor: ${names[techId - 1]}`, 'info');
+        this.showToast(`Activada ${names[techId - 1]}`, 2500);
+
+        if (this.gyroActive) {
+            this.stopAllSensors();
+            this.startActiveTechnique();
+        }
+    }
+
     toggleGyro() {
         if (this.gyroActive) {
-            this.stopGyro();
-            this.showToast('Sensor de movimiento desactivado');
+            this.stopAllSensors();
+            this.showToast('Sensores desactivados');
             return;
         }
 
+        this.gyroActive = true;
+        const btnGyro = document.getElementById('btn-gyro');
+        if (btnGyro) btnGyro.classList.add('active');
+        const dbgGyro = document.getElementById('dbg-gyro');
+        if (dbgGyro) dbgGyro.textContent = `Activo (T${this.activeSensorTech})`;
+
+        this.startActiveTechnique();
+    }
+
+    startActiveTechnique() {
         this.gyroInitialOrientation = null;
         this.gyroStartCamera = null;
 
-        // Permisos en iOS 13+ si fuera necesario
-        if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
-            DeviceOrientationEvent.requestPermission()
-                .then(state => {
-                    if (state === 'granted') {
-                        this.startMotionSensors();
-                    } else {
-                        this.showToast('Permiso de sensores denegado');
-                    }
-                })
-                .catch(() => this.showToast('Error accediendo a sensores'));
-        } else {
-            this.startMotionSensors();
+        if (this.activeSensorTech === 1) {
+            // T1: Generic Sensor API
+            this.startSensorAPI();
+        } else if (this.activeSensorTech === 2) {
+            // T2: DeviceOrientation
+            this.startDeviceOrientation();
+        } else if (this.activeSensorTech === 3) {
+            // T3: Accelerometer G
+            this.startDeviceMotion();
+        } else if (this.activeSensorTech === 4) {
+            // T4: Compass / Gravity
+            this.startCompassAndMotion();
         }
     }
 
-    startMotionSensors() {
-        this.gyroActive = true;
-        this.gyroInitialOrientation = null;
-        this.gyroStartCamera = null;
-
-        // 1. Escuchar Acelerómetro (Gravedad física de 3 ejes - siempre presente en Moto G)
-        this.handleDeviceMotion = (e) => this.onDeviceMotion(e);
-        window.addEventListener('devicemotion', this.handleDeviceMotion);
-
-        // 2. Escuchar Orientación / Brújula (para giro 360 horizontal)
-        this.handleDeviceOrientation = (e) => this.onDeviceOrientation(e);
-        window.addEventListener('deviceorientationabsolute', this.handleDeviceOrientation);
-        window.addEventListener('deviceorientation', this.handleDeviceOrientation);
-
-        const btnGyro = document.getElementById('btn-gyro');
-        if (btnGyro) btnGyro.classList.add('active');
-
-        const dbgGyro = document.getElementById('dbg-gyro');
-        if (dbgGyro) dbgGyro.textContent = 'Activo (Acelerómetro + Brújula)';
-
-        this.showToast('Sensor de movimiento activado: Movete con el celu 📱', 4000);
-    }
-
-    stopGyro() {
+    stopAllSensors() {
         this.gyroActive = false;
-        if (this.handleDeviceMotion) {
-            window.removeEventListener('devicemotion', this.handleDeviceMotion);
+        if (this.gyroSensor) {
+            try { this.gyroSensor.stop(); } catch(e) {}
+            this.gyroSensor = null;
         }
         if (this.handleDeviceOrientation) {
             window.removeEventListener('deviceorientationabsolute', this.handleDeviceOrientation);
             window.removeEventListener('deviceorientation', this.handleDeviceOrientation);
+        }
+        if (this.handleDeviceMotion) {
+            window.removeEventListener('devicemotion', this.handleDeviceMotion);
         }
         const btnGyro = document.getElementById('btn-gyro');
         if (btnGyro) btnGyro.classList.remove('active');
@@ -371,61 +406,264 @@ class DomeViewer {
         if (dbgGyro) dbgGyro.textContent = 'Inactivo';
     }
 
-    // Acelerómetro físico (detecta inclinación y gravedad en tiempo real)
-    onDeviceMotion(e) {
-        if (!this.gyroActive || !e.accelerationIncludingGravity) return;
+    // TÉCNICA 1: Generic Sensor API
+    startSensorAPI() {
+        if ('RelativeOrientationSensor' in window || 'AbsoluteOrientationSensor' in window) {
+            try {
+                const SensorClass = window.RelativeOrientationSensor || window.AbsoluteOrientationSensor;
+                this.gyroSensor = new SensorClass({ frequency: 60 });
+                this.gyroSensor.addEventListener('reading', () => {
+                    this.onSensorTick();
+                    const q = this.gyroSensor.quaternion;
+                    if (!q) return;
 
-        const ag = e.accelerationIncludingGravity;
-        const gx = ag.x || 0;
-        const gy = ag.y || 0;
-        const gz = ag.z || 0;
+                    const qObj = new THREE.Quaternion(q[0], q[1], q[2], q[3]);
+                    const euler = new THREE.Euler().setFromQuaternion(qObj, 'YXZ');
 
-        const screenOrient = (window.screen && window.screen.orientation && window.screen.orientation.angle !== undefined)
-            ? window.screen.orientation.angle
-            : (window.orientation || 0);
+                    const pitchDeg = THREE.MathUtils.radToDeg(euler.x);
+                    const yawDeg = THREE.MathUtils.radToDeg(euler.y);
+                    const rollDeg = THREE.MathUtils.radToDeg(euler.z);
 
-        // Calcular ángulo de inclinación respecto a la gravedad
-        let pitchRad = 0;
-        let rollRad = 0;
+                    this.liveSensorData.beta = pitchDeg.toFixed(1);
+                    this.liveSensorData.alpha = yawDeg.toFixed(1);
+                    this.liveSensorData.gamma = rollDeg.toFixed(1);
 
-        if (screenOrient === 90) {
-            // Landscape horizontal
-            pitchRad = Math.atan2(gx, Math.sqrt(gy * gy + gz * gz));
-            rollRad = Math.atan2(gy, gz);
-        } else if (screenOrient === -90 || screenOrient === 270) {
-            pitchRad = Math.atan2(-gx, Math.sqrt(gy * gy + gz * gz));
-            rollRad = Math.atan2(-gy, gz);
+                    if (this.gyroInitialOrientation === null) {
+                        this.gyroInitialOrientation = { pitch: pitchDeg, yaw: yawDeg };
+                        this.gyroStartCamera = { pitch: this.pitch, yaw: this.yaw };
+                    }
+
+                    const deltaPitch = pitchDeg - this.gyroInitialOrientation.pitch;
+                    const deltaYaw = yawDeg - this.gyroInitialOrientation.yaw;
+
+                    this.targetPitch = Math.max(-89.9, Math.min(89.9, this.gyroStartCamera.pitch - deltaPitch));
+                    this.targetYaw = this.gyroStartCamera.yaw - deltaYaw;
+                });
+                this.gyroSensor.addEventListener('error', (err) => {
+                    this.logDebug(`Error Sensor API: ${err.error.name}. Cambiando a T2...`, 'warn');
+                    this.setSensorTechnique(2);
+                });
+                this.gyroSensor.start();
+                this.showToast('T1 (Sensor API 60Hz) Activo 📱');
+            } catch(e) {
+                this.setSensorTechnique(2);
+            }
         } else {
-            // Portrait vertical
-            pitchRad = Math.atan2(gy, Math.sqrt(gx * gx + gz * gz));
-            rollRad = Math.atan2(gx, gz);
+            this.setSensorTechnique(2);
         }
-
-        const pitchDeg = pitchRad * (180 / Math.PI);
-
-        if (this.gyroInitialOrientation === null) {
-            this.gyroInitialOrientation = { pitch: pitchDeg, yaw: this.yaw };
-            this.gyroStartCamera = { pitch: this.pitch, yaw: this.yaw };
-        }
-
-        const deltaPitch = pitchDeg - this.gyroInitialOrientation.pitch;
-        this.targetPitch = Math.max(-89.9, Math.min(89.9, this.gyroStartCamera.pitch + deltaPitch * 1.3));
     }
 
-    // Brújula / Orientación (detecta rotación azimutal 360°)
-    onDeviceOrientation(e) {
-        if (!this.gyroActive) return;
-        const yawVal = (e.alpha !== null && e.alpha !== undefined) ? e.alpha : e.webkitCompassHeading;
-        if (yawVal === null || yawVal === undefined) return;
+    // TÉCNICA 2: DeviceOrientation Event
+    startDeviceOrientation() {
+        this.handleDeviceOrientation = (e) => {
+            this.onSensorTick();
+            this.liveSensorData.alpha = e.alpha !== null ? e.alpha.toFixed(1) : 'null';
+            this.liveSensorData.beta = e.beta !== null ? e.beta.toFixed(1) : 'null';
+            this.liveSensorData.gamma = e.gamma !== null ? e.gamma.toFixed(1) : 'null';
 
-        if (this.gyroInitialOrientation && this.gyroInitialOrientation.compassYaw === undefined) {
-            this.gyroInitialOrientation.compassYaw = yawVal;
+            if (e.beta === null && e.gamma === null && e.alpha === null) return;
+
+            const screenOrient = (window.screen && window.screen.orientation && window.screen.orientation.angle !== undefined)
+                ? window.screen.orientation.angle
+                : (window.orientation || 0);
+
+            let pitchVal = e.beta || 0;
+            let yawVal = (e.alpha !== null ? e.alpha : e.webkitCompassHeading) || 0;
+
+            if (screenOrient === 90) {
+                pitchVal = -(e.gamma || 0);
+                yawVal = (e.alpha || 0) + 90;
+            } else if (screenOrient === -90 || screenOrient === 270) {
+                pitchVal = (e.gamma || 0);
+                yawVal = (e.alpha || 0) - 90;
+            }
+
+            if (this.gyroInitialOrientation === null) {
+                this.gyroInitialOrientation = { pitch: pitchVal, yaw: yawVal };
+                this.gyroStartCamera = { pitch: this.pitch, yaw: this.yaw };
+            }
+
+            const deltaPitch = pitchVal - this.gyroInitialOrientation.pitch;
+            const deltaYaw = yawVal - this.gyroInitialOrientation.yaw;
+
+            this.targetPitch = Math.max(-89.9, Math.min(89.9, this.gyroStartCamera.pitch - deltaPitch));
+            this.targetYaw = this.gyroStartCamera.yaw + deltaYaw;
+        };
+
+        window.addEventListener('deviceorientationabsolute', this.handleDeviceOrientation);
+        window.addEventListener('deviceorientation', this.handleDeviceOrientation);
+        this.showToast('T2 (DeviceOrientation) Activo 📱');
+    }
+
+    // TÉCNICA 3: Pure Accelerometer Gravity
+    startDeviceMotion() {
+        this.handleDeviceMotion = (e) => {
+            this.onSensorTick();
+            const ag = e.accelerationIncludingGravity;
+            if (!ag) return;
+
+            const gx = ag.x || 0;
+            const gy = ag.y || 0;
+            const gz = ag.z || 0;
+
+            this.liveSensorData.gx = gx.toFixed(2);
+            this.liveSensorData.gy = gy.toFixed(2);
+            this.liveSensorData.gz = gz.toFixed(2);
+
+            const pitchRad = Math.atan2(gy, Math.sqrt(gx * gx + gz * gz));
+            const rollRad = Math.atan2(gx, gz);
+
+            const pitchDeg = pitchRad * (180 / Math.PI);
+            const rollDeg = rollRad * (180 / Math.PI);
+
+            this.liveSensorData.beta = pitchDeg.toFixed(1);
+            this.liveSensorData.gamma = rollDeg.toFixed(1);
+
+            if (this.gyroInitialOrientation === null) {
+                this.gyroInitialOrientation = { pitch: pitchDeg, roll: rollDeg };
+                this.gyroStartCamera = { pitch: this.pitch, yaw: this.yaw };
+            }
+
+            const deltaPitch = pitchDeg - this.gyroInitialOrientation.pitch;
+            const deltaRoll = rollDeg - this.gyroInitialOrientation.roll;
+
+            this.targetPitch = Math.max(-89.9, Math.min(89.9, this.gyroStartCamera.pitch + deltaPitch * 1.4));
+            this.targetYaw = this.gyroStartCamera.yaw - deltaRoll * 1.4;
+        };
+
+        window.addEventListener('devicemotion', this.handleDeviceMotion);
+        this.showToast('T3 (Acelerómetro por Gravedad) Activo 📱');
+    }
+
+    // TÉCNICA 4: Compass Heading + Accelerometer Pitch
+    startCompassAndMotion() {
+        this.handleDeviceMotion = (e) => {
+            this.onSensorTick();
+            const ag = e.accelerationIncludingGravity;
+            if (!ag) return;
+            const gx = ag.x || 0, gy = ag.y || 0, gz = ag.z || 0;
+            this.liveSensorData.gx = gx.toFixed(2);
+            this.liveSensorData.gy = gy.toFixed(2);
+            this.liveSensorData.gz = gz.toFixed(2);
+
+            const pitchDeg = Math.atan2(gy, Math.sqrt(gx * gx + gz * gz)) * (180 / Math.PI);
+            this.liveSensorData.beta = pitchDeg.toFixed(1);
+
+            if (this.gyroInitialOrientation === null) {
+                this.gyroInitialOrientation = { pitch: pitchDeg, compass: this.yaw };
+                this.gyroStartCamera = { pitch: this.pitch, yaw: this.yaw };
+            }
+
+            const deltaPitch = pitchDeg - this.gyroInitialOrientation.pitch;
+            this.targetPitch = Math.max(-89.9, Math.min(89.9, this.gyroStartCamera.pitch + deltaPitch * 1.3));
+        };
+
+        this.handleDeviceOrientation = (e) => {
+            const compass = (e.webkitCompassHeading !== undefined && e.webkitCompassHeading !== null) 
+                ? e.webkitCompassHeading 
+                : (e.alpha || 0);
+
+            this.liveSensorData.alpha = compass.toFixed(1);
+
+            if (this.gyroInitialOrientation && this.gyroInitialOrientation.compassInit === undefined) {
+                this.gyroInitialOrientation.compassInit = compass;
+            }
+
+            if (this.gyroInitialOrientation && this.gyroInitialOrientation.compassInit !== undefined) {
+                const deltaYaw = compass - this.gyroInitialOrientation.compassInit;
+                this.targetYaw = this.gyroStartCamera.yaw - deltaYaw;
+            }
+        };
+
+        window.addEventListener('devicemotion', this.handleDeviceMotion);
+        window.addEventListener('deviceorientation', this.handleDeviceOrientation);
+        this.showToast('T4 (Brújula + Gravedad) Activo 📱');
+    }
+
+    onSensorTick() {
+        this.sensorTicks++;
+        const now = performance.now();
+        if (now - this.lastSensorTickTime >= 1000) {
+            this.sensorTicksPerSec = this.sensorTicks;
+            this.sensorTicks = 0;
+            this.lastSensorTickTime = now;
+            this.updateSensorDebugHUD();
+        }
+    }
+
+    /* --------------------------------------------------------------------------
+       PANEL DE DIAGNÓSTICO EN VIVO DE SENSORES (UI)
+       -------------------------------------------------------------------------- */
+    initSensorDebugUI() {
+        const btnOpen = document.getElementById('btn-open-sensor-dbg');
+        const btnClose = document.getElementById('btn-close-sensor-dbg');
+        const overlay = document.getElementById('sensor-debug-overlay');
+
+        if (btnOpen) {
+            btnOpen.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (overlay) overlay.classList.remove('hidden');
+                if (!this.gyroActive) this.toggleGyro();
+            });
         }
 
-        if (this.gyroInitialOrientation && this.gyroInitialOrientation.compassYaw !== undefined) {
-            const deltaYaw = yawVal - this.gyroInitialOrientation.compassYaw;
-            this.targetYaw = this.gyroStartCamera.yaw - deltaYaw;
+        if (btnClose) {
+            btnClose.addEventListener('click', () => {
+                if (overlay) overlay.classList.add('hidden');
+            });
         }
+
+        // Botones de las 4 técnicas
+        for (let i = 1; i <= 4; i++) {
+            const btn = document.getElementById(`btn-tech-${i}`);
+            if (btn) {
+                btn.addEventListener('click', () => this.setSensorTechnique(i));
+            }
+        }
+
+        const btnCycle = document.getElementById('btn-cycle-tech');
+        if (btnCycle) {
+            btnCycle.addEventListener('click', () => {
+                const nextTech = (this.activeSensorTech % 4) + 1;
+                this.setSensorTechnique(nextTech);
+            });
+        }
+
+        const btnReqPerm = document.getElementById('btn-req-sensor-perm');
+        if (btnReqPerm) {
+            btnReqPerm.addEventListener('click', () => {
+                if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+                    DeviceOrientationEvent.requestPermission().then(st => this.showToast(`Permiso iOS: ${st}`));
+                } else if ('permissions' in navigator && navigator.permissions.query) {
+                    navigator.permissions.query({ name: 'accelerometer' }).then(r => this.showToast(`Acelerómetro: ${r.state}`)).catch(() => {});
+                    navigator.permissions.query({ name: 'gyroscope' }).then(r => this.showToast(`Giroscopio: ${r.state}`)).catch(() => {});
+                } else {
+                    this.showToast('Permisos estándar listos');
+                }
+            });
+        }
+    }
+
+    updateSensorDebugHUD() {
+        if (!this.sensorDebugOverlay || this.sensorDebugOverlay.classList.contains('hidden')) return;
+
+        const elHz = document.getElementById('live-events-sec');
+        if (elHz) elHz.textContent = `${this.sensorTicksPerSec} Hz`;
+
+        const elAlpha = document.getElementById('live-alpha');
+        if (elAlpha) elAlpha.textContent = this.liveSensorData.alpha !== null ? `${this.liveSensorData.alpha}°` : '--';
+
+        const elBeta = document.getElementById('live-beta');
+        if (elBeta) elBeta.textContent = this.liveSensorData.beta !== null ? `${this.liveSensorData.beta}°` : '--';
+
+        const elGamma = document.getElementById('live-gamma');
+        if (elGamma) elGamma.textContent = this.liveSensorData.gamma !== null ? `${this.liveSensorData.gamma}°` : '--';
+
+        const elGrav = document.getElementById('live-gravity');
+        if (elGrav) elGrav.textContent = `[${this.liveSensorData.gx}, ${this.liveSensorData.gy}, ${this.liveSensorData.gz}]`;
+
+        const elCam = document.getElementById('live-camera');
+        if (elCam) elCam.textContent = `P: ${this.pitch.toFixed(1)}°, Y: ${this.yaw.toFixed(1)}°`;
     }
 
     /* --------------------------------------------------------------------------
@@ -481,7 +719,7 @@ class DomeViewer {
                     this.setPlayState(true);
                     this.hideBuffering();
                     this.updateVolumeIcons();
-                    this.showToast('Audio en silencio. Tocá el parlante para activar sonido.', 4000);
+                    this.showToast('Audio en silencio. Tocá el parlante para activar.', 4000);
                 }).catch(() => {
                     this.setPlayState(false);
                     this.hideBuffering();
@@ -1012,7 +1250,8 @@ FPS: ${this.currentFps}
 Buffer: ${this.activeVideo === this.videoA ? 'Video A' : 'Video B'}
 ReadyState: ${this.activeVideo ? READY_STATE_MAP[this.activeVideo.readyState] : 'null'}
 Tiempo: ${this.activeVideo ? this.activeVideo.currentTime.toFixed(2) : 0}s / ${this.totalDuration.toFixed(2)}s
-Segmento: #${this.currentSegmentIndex + 1} (${seg.file || 'N/A'}`;
+Segmento: #${this.currentSegmentIndex + 1} (${seg.file || 'N/A'})
+Sensor Técnica: T${this.activeSensorTech} (${this.sensorTicksPerSec} Hz)`;
     }
 
     /* --------------------------------------------------------------------------
@@ -1033,7 +1272,6 @@ Segmento: #${this.currentSegmentIndex + 1} (${seg.file || 'N/A'}`;
 
         window.addEventListener('mousemove', triggerMouseActive);
 
-        // Tap simple en pantalla en mobile para mostrar/ocultar barra
         this.container.addEventListener('pointerdown', (e) => this.onPointerDown(e));
         window.addEventListener('pointermove', (e) => {
             this.onPointerMove(e);
@@ -1124,7 +1362,6 @@ Segmento: #${this.currentSegmentIndex + 1} (${seg.file || 'N/A'}`;
     }
 
     onTouchEnd(e) {
-        // Si fue un tap limpio (sin arrastre), alternar visibilidad de controles en mobile
         if (!this.touchMoved && this.isMobile && e.target === this.renderer.domElement) {
             this.uiLayer.classList.toggle('controls-locked');
         }
@@ -1183,6 +1420,7 @@ Segmento: #${this.currentSegmentIndex + 1} (${seg.file || 'N/A'}`;
             this.currentFps = Math.round((this.frameCount * 1000) / (now - this.lastFpsUpdate));
             this.frameCount = 0;
             this.lastFpsUpdate = now;
+            this.updateSensorDebugHUD();
         }
 
         // Actualizar textura de video en WebGL
