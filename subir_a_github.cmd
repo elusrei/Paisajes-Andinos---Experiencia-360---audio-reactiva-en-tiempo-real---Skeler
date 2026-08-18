@@ -19,7 +19,10 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-:: 2. Inicializar repositorio Git si no existe
+:: 2. Configurar directorio seguro e Inicializar repositorio Git si no existe
+git config --global --add safe.directory "%~dp0" >nul 2>nul
+git config --global --add safe.directory "%CD%" >nul 2>nul
+
 if not exist ".git" (
     echo [*] Inicializando repositorio Git local...
     git init
