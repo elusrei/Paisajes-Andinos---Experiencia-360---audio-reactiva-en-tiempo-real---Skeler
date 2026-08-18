@@ -1,5 +1,4 @@
 @echo off
-chcp 65001 >nul
 title Visor 360 - Servidor Local
 color 0A
 
