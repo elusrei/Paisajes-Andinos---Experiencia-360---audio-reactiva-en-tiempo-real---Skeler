@@ -23,8 +23,8 @@
     <div id="canvas-container"></div>
 
     <!-- Elementos de Video en Doble Búfer (Ping-Pong para reproducción continua sin cortes) -->
-    <video id="dome-video-a" playsinline webkit-playsinline crossOrigin="anonymous" preload="auto" style="display:none;"></video>
-    <video id="dome-video-b" playsinline webkit-playsinline crossOrigin="anonymous" preload="auto" style="display:none;"></video>
+    <video id="dome-video-a" playsinline webkit-playsinline crossOrigin="anonymous" preload="auto" style="position:fixed;top:-9999px;left:-9999px;width:16px;height:16px;opacity:0;pointer-events:none;"></video>
+    <video id="dome-video-b" playsinline webkit-playsinline crossOrigin="anonymous" preload="auto" style="position:fixed;top:-9999px;left:-9999px;width:16px;height:16px;opacity:0;pointer-events:none;"></video>
 
     <!-- Selector de Archivo Local Oculto -->
     <input type="file" id="file-input" accept="video/mp4,video/webm,video/ogg,image/*" style="display: none;">

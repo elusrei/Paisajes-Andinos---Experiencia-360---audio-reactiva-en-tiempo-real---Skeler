@@ -60,7 +60,7 @@ class DomeViewer {
         this.targetFov = 75;
         this.damping = 0.08;    // Inercia suave
         this.autoRotate = false;
-        this.autoRotateSpeed = 0.08;
+        this.autoRotateSpeed = 0.15;
 
         // Teclado
         this.keys = {};
@@ -126,11 +126,13 @@ class DomeViewer {
         this.textureA.minFilter = THREE.LinearFilter;
         this.textureA.magFilter = THREE.LinearFilter;
         this.textureA.format = THREE.RGBAFormat;
+        this.textureA.generateMipmaps = false;
 
         this.textureB = new THREE.VideoTexture(this.videoB);
         this.textureB.minFilter = THREE.LinearFilter;
         this.textureB.magFilter = THREE.LinearFilter;
         this.textureB.format = THREE.RGBAFormat;
+        this.textureB.generateMipmaps = false;
 
         this.activeTexture = this.textureA;
 
@@ -205,7 +207,6 @@ class DomeViewer {
        MOTOR DE REPRODUCCIÓN SEGMENTADA (DOBLE BÚFER PING-PONG)
        -------------------------------------------------------------------------- */
     initSegmentEngine() {
-        // Cargar manifest dinámico si está disponible o usar DEFAULT_SEGMENTS
         fetch('segments/manifest.json')
             .then(res => res.json())
             .then(data => {
@@ -216,7 +217,7 @@ class DomeViewer {
                 }
             })
             .catch(() => {
-                // Usar fallback ya configurado
+                // Fallback ya configurado
             });
 
         // Configurar fuentes iniciales
@@ -259,6 +260,18 @@ class DomeViewer {
             }
         });
 
+        videoEl.addEventListener('play', () => {
+            if (videoEl === this.activeVideo) {
+                this.setPlayState(true);
+            }
+        });
+
+        videoEl.addEventListener('pause', () => {
+            if (videoEl === this.activeVideo && !this.isTransitioning) {
+                this.setPlayState(false);
+            }
+        });
+
         videoEl.addEventListener('error', (e) => {
             console.warn(`Video ${id} error:`, e);
         });
@@ -271,9 +284,9 @@ class DomeViewer {
         const globalTime = seg.start + this.activeVideo.currentTime;
         this.updateTimelineWithTime(globalTime);
 
-        // Disparar precarga y transición cuando faltan 0.08 segundos para terminar el segmento
+        // Precarga y transición suave antes del final
         const remaining = seg.duration - this.activeVideo.currentTime;
-        if (remaining <= 0.08 && remaining > 0 && !this.isTransitioning) {
+        if (remaining <= 0.12 && remaining > 0 && !this.isTransitioning) {
             this.transitionToNextSegment();
         }
     }
@@ -287,7 +300,6 @@ class DomeViewer {
         const nextIndex = (this.currentSegmentIndex + 1) % this.segments.length;
         this.isTransitioning = true;
 
-        // Intercambiar roles de Video A y Video B
         const nextActive = this.standbyVideo;
         const nextStandby = this.activeVideo;
         const nextTexture = (nextActive === this.videoA) ? this.textureA : this.textureB;
@@ -295,11 +307,12 @@ class DomeViewer {
         this.currentSegmentIndex = nextIndex;
         this.activeVideo = nextActive;
         this.standbyVideo = nextStandby;
+        this.activeTexture = nextTexture;
 
         // Actualizar textura Three.js inmediatamente
-        this.domeMaterial.uniforms.tVideo.value = nextTexture;
+        this.domeMaterial.uniforms.tVideo.value = this.activeTexture;
 
-        // Sincronizar volumen, mute y velocidad
+        // Sincronizar parámetros
         this.activeVideo.volume = this.standbyVideo.volume;
         this.activeVideo.muted = this.standbyVideo.muted;
         this.activeVideo.playbackRate = this.playbackSpeeds[this.speedIndex];
@@ -318,7 +331,7 @@ class DomeViewer {
 
         setTimeout(() => {
             this.isTransitioning = false;
-        }, 150);
+        }, 200);
     }
 
     seekGlobalTime(targetTime) {
@@ -330,7 +343,6 @@ class DomeViewer {
             return;
         }
 
-        // Encontrar a qué segmento corresponde el tiempo
         let targetIndex = 0;
         for (let i = 0; i < this.segments.length; i++) {
             if (targetTime >= this.segments[i].start && targetTime < this.segments[i].end) {
@@ -361,20 +373,10 @@ class DomeViewer {
         this.updateTimelineWithTime(targetTime);
     }
 
-    getGlobalCurrentTime() {
-        if (!this.isSegmentedMode) {
-            return this.activeVideo.currentTime || 0;
-        }
-        const seg = this.segments[this.currentSegmentIndex];
-        if (!seg) return 0;
-        return seg.start + (this.activeVideo.currentTime || 0);
-    }
-
     /* --------------------------------------------------------------------------
        EVENTOS DE RATÓN, TECLADO Y VENTANA
        -------------------------------------------------------------------------- */
     initEvents() {
-        // Redimensión de ventana
         window.addEventListener('resize', () => this.onWindowResize());
 
         // Ratón / Puntero para navegar la cámara
@@ -409,7 +411,6 @@ class DomeViewer {
             }
         });
 
-        // Actividad de UI para auto-ocultar
         window.addEventListener('mousemove', () => this.resetUiTimeout());
     }
 
@@ -429,8 +430,6 @@ class DomeViewer {
 
         this.targetYaw += deltaX * sensitivity;
         this.targetPitch -= deltaY * sensitivity;
-
-        // Limitar elevación para evitar gimbal lock (Cenit = 90°, Suelo = -90°)
         this.targetPitch = Math.max(-89.9, Math.min(89.9, this.targetPitch));
 
         this.previousMousePosition = { x: e.clientX, y: e.clientY };
@@ -444,7 +443,7 @@ class DomeViewer {
         e.preventDefault();
         const zoomSpeed = 0.05;
         this.targetFov += e.deltaY * zoomSpeed;
-        this.targetFov = Math.max(30, Math.min(120, this.targetFov)); // Límites de FOV
+        this.targetFov = Math.max(30, Math.min(120, this.targetFov));
     }
 
     onKeyDown(e) {
@@ -502,86 +501,137 @@ class DomeViewer {
             });
         }
 
-        // Botón Play/Pausa
-        document.getElementById('btn-play').addEventListener('click', () => this.togglePlay());
+        // Botón Play/Pausa (Soporta btn-play-pause y btn-play)
+        const playBtn = document.getElementById('btn-play-pause') || document.getElementById('btn-play');
+        if (playBtn) {
+            playBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.togglePlay();
+            });
+        }
 
         // Botón Volumen / Mute
-        document.getElementById('btn-mute').addEventListener('click', () => this.toggleMute());
+        const muteBtn = document.getElementById('btn-mute');
+        if (muteBtn) {
+            muteBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.toggleMute();
+            });
+        }
 
         const volumeSlider = document.getElementById('volume-slider');
-        volumeSlider.addEventListener('input', (e) => {
-            const val = parseFloat(e.target.value);
-            this.videoA.volume = val;
-            this.videoB.volume = val;
-            this.videoA.muted = false;
-            this.videoB.muted = false;
-            this.updateVolumeIcons();
-        });
+        if (volumeSlider) {
+            volumeSlider.addEventListener('input', (e) => {
+                const val = parseFloat(e.target.value);
+                this.videoA.volume = val;
+                this.videoB.volume = val;
+                this.videoA.muted = false;
+                this.videoB.muted = false;
+                this.updateVolumeIcons();
+            });
+        }
 
         // Timeline Scrubbing
         const timelineContainer = document.getElementById('timeline-container');
-        timelineContainer.addEventListener('mousedown', (e) => this.startScrubbing(e));
-        window.addEventListener('mousemove', (e) => {
-            if (this.isScrubbing) this.scrub(e);
-        });
-        window.addEventListener('mouseup', () => {
-            this.isScrubbing = false;
-        });
+        if (timelineContainer) {
+            timelineContainer.addEventListener('mousedown', (e) => this.startScrubbing(e));
+            window.addEventListener('mousemove', (e) => {
+                if (this.isScrubbing) this.scrub(e);
+            });
+            window.addEventListener('mouseup', () => {
+                this.isScrubbing = false;
+            });
+        }
 
         // Velocidad de Reproducción
         const btnSpeed = document.getElementById('btn-speed');
-        btnSpeed.addEventListener('click', () => {
-            this.speedIndex = (this.speedIndex + 1) % this.playbackSpeeds.length;
-            const speed = this.playbackSpeeds[this.speedIndex];
-            this.videoA.playbackRate = speed;
-            this.videoB.playbackRate = speed;
-            btnSpeed.querySelector('span').textContent = `${speed}x`;
-            this.showToast(`Velocidad: ${speed}x`);
-        });
+        if (btnSpeed) {
+            btnSpeed.addEventListener('click', () => {
+                this.speedIndex = (this.speedIndex + 1) % this.playbackSpeeds.length;
+                const speed = this.playbackSpeeds[this.speedIndex];
+                this.videoA.playbackRate = speed;
+                this.videoB.playbackRate = speed;
+                btnSpeed.textContent = `${speed}x`;
+                this.showToast(`Velocidad: ${speed}x`);
+            });
+        }
+
+        // Auto-rotación
+        const autoRotBtn = document.getElementById('btn-auto-rotate');
+        if (autoRotBtn) {
+            autoRotBtn.addEventListener('click', () => {
+                this.autoRotate = !this.autoRotate;
+                autoRotBtn.classList.toggle('active', this.autoRotate);
+                this.showToast(this.autoRotate ? 'Auto-rotación activada' : 'Auto-rotación desactivada');
+            });
+        }
+
+        // Conmutador de Proyección Fisheye / Equirectangular
+        const projToggleBtn = document.getElementById('btn-projection-toggle');
+        if (projToggleBtn) {
+            projToggleBtn.addEventListener('click', () => {
+                this.config.projectionMode = this.config.projectionMode === 0 ? 1 : 0;
+                this.domeMaterial.uniforms.uProjectionMode.value = this.config.projectionMode;
+                const label = this.config.projectionMode === 0 ? 'Fisheye' : 'Equirectangular';
+                const span = projToggleBtn.querySelector('span');
+                if (span) span.textContent = label;
+                document.getElementById('projection-badge').textContent = this.config.projectionMode === 0 ? 'FULLDOME 180°' : 'ESFERA 360°';
+                this.showToast(`Proyección: ${label}`);
+            });
+        }
 
         // Conmutador Semiesfera / Esfera Completa
         const btnToggleHemi = document.getElementById('btn-toggle-hemi');
-        btnToggleHemi.addEventListener('click', () => {
-            this.config.hemisphereOnly = !this.config.hemisphereOnly;
-            this.domeMaterial.uniforms.uHemisphereOnly.value = this.config.hemisphereOnly ? 1.0 : 0.0;
-            this.horizonGrid.visible = this.config.hemisphereOnly;
-            const modeName = this.config.hemisphereOnly ? 'Semiesfera Superior (Domo)' : 'Esfera Completa 360°';
-            document.getElementById('projection-badge').textContent = this.config.hemisphereOnly ? 'FULLDOME 180°' : 'ESFERA 360°';
-            this.showToast(`Modo: ${modeName}`);
-        });
+        if (btnToggleHemi) {
+            btnToggleHemi.addEventListener('click', () => {
+                this.config.hemisphereOnly = !this.config.hemisphereOnly;
+                this.domeMaterial.uniforms.uHemisphereOnly.value = this.config.hemisphereOnly ? 1.0 : 0.0;
+                this.horizonGrid.visible = this.config.hemisphereOnly;
+                const modeName = this.config.hemisphereOnly ? 'Semiesfera Superior (Domo)' : 'Esfera Completa 360°';
+                document.getElementById('projection-badge').textContent = this.config.hemisphereOnly ? 'FULLDOME 180°' : 'ESFERA 360°';
+                this.showToast(`Modo: ${modeName}`);
+            });
+        }
 
         // Cargar Archivo Local
-        document.getElementById('btn-load-file').addEventListener('click', () => {
-            this.fileInput.click();
-        });
-        this.fileInput.addEventListener('change', (e) => {
-            if (e.target.files && e.target.files.length > 0) {
-                this.loadCustomVideoFile(e.target.files[0]);
-            }
-        });
+        const btnLoadFile = document.getElementById('btn-load-file');
+        if (btnLoadFile) {
+            btnLoadFile.addEventListener('click', () => this.fileInput.click());
+        }
+        if (this.fileInput) {
+            this.fileInput.addEventListener('change', (e) => {
+                if (e.target.files && e.target.files.length > 0) {
+                    this.loadCustomVideoFile(e.target.files[0]);
+                }
+            });
+        }
 
         // Captura de pantalla
-        document.getElementById('btn-snapshot').addEventListener('click', () => this.takeSnapshot());
+        const btnSnapshot = document.getElementById('btn-snapshot');
+        if (btnSnapshot) btnSnapshot.addEventListener('click', () => this.takeSnapshot());
 
         // Pantalla Completa
-        document.getElementById('btn-fullscreen').addEventListener('click', () => this.toggleFullscreen());
+        const btnFullscreen = document.getElementById('btn-fullscreen');
+        if (btnFullscreen) btnFullscreen.addEventListener('click', () => this.toggleFullscreen());
 
         // Drawer de Calibración
         const btnSettings = document.getElementById('btn-settings-toggle');
         const btnCloseSettings = document.getElementById('btn-close-settings');
-        btnSettings.addEventListener('click', () => {
-            this.settingsDrawer.classList.toggle('open');
-        });
-        btnCloseSettings.addEventListener('click', () => {
-            this.settingsDrawer.classList.remove('open');
-        });
+        if (btnSettings) {
+            btnSettings.addEventListener('click', () => this.settingsDrawer.classList.toggle('open'));
+        }
+        if (btnCloseSettings) {
+            btnCloseSettings.addEventListener('click', () => this.settingsDrawer.classList.remove('open'));
+        }
 
-        // Controles de Calibración del Shader
+        // Controles de Calibración
         this.initCalibrationControls();
 
         // Presets de Cámara
         document.querySelectorAll('.btn-preset').forEach(btn => {
             btn.addEventListener('click', (e) => {
+                document.querySelectorAll('.btn-preset').forEach(b => b.classList.remove('active'));
+                e.currentTarget.classList.add('active');
                 const preset = e.currentTarget.dataset.view;
                 this.setPresetView(preset);
                 this.showToast(`Vista: ${preset.toUpperCase()}`);
@@ -589,90 +639,114 @@ class DomeViewer {
         });
 
         // Widget Brújula
-        document.getElementById('compass-widget').addEventListener('click', () => {
-            this.setPresetView('zenith');
-            this.showToast('Reorientado al Cenit');
-        });
+        const compWidget = document.getElementById('orientation-widget') || document.getElementById('compass-widget');
+        if (compWidget) {
+            compWidget.addEventListener('click', () => {
+                this.setPresetView('zenith');
+                document.querySelectorAll('.btn-preset').forEach(b => b.classList.remove('active'));
+                document.querySelector('.btn-preset[data-view="zenith"]')?.classList.add('active');
+                this.showToast('Reorientado al Cenit');
+            });
+        }
     }
 
     initCalibrationControls() {
         const sFov = document.getElementById('slider-dome-fov');
         const lFov = document.getElementById('lbl-dome-fov');
-        sFov.addEventListener('input', (e) => {
-            const val = parseFloat(e.target.value);
-            this.config.domeFov = val;
-            this.domeMaterial.uniforms.uDomeFov.value = (val * Math.PI) / 180;
-            lFov.textContent = `${val}°`;
-        });
+        if (sFov) {
+            sFov.addEventListener('input', (e) => {
+                const val = parseFloat(e.target.value);
+                this.config.domeFov = val;
+                this.domeMaterial.uniforms.uDomeFov.value = (val * Math.PI) / 180;
+                if (lFov) lFov.textContent = `${val}°`;
+            });
+        }
 
         const sScale = document.getElementById('slider-scale');
         const lScale = document.getElementById('lbl-scale');
-        sScale.addEventListener('input', (e) => {
-            const val = parseFloat(e.target.value);
-            this.config.scale = val;
-            this.domeMaterial.uniforms.uScale.value = val;
-            lScale.textContent = `${val.toFixed(2)}x`;
-        });
+        if (sScale) {
+            sScale.addEventListener('input', (e) => {
+                const val = parseFloat(e.target.value);
+                this.config.scale = val;
+                this.domeMaterial.uniforms.uScale.value = val;
+                if (lScale) lScale.textContent = `${val.toFixed(2)}x`;
+            });
+        }
 
         const sOffX = document.getElementById('slider-offset-x');
         const lOffX = document.getElementById('lbl-offset-x');
-        sOffX.addEventListener('input', (e) => {
-            const val = parseFloat(e.target.value);
-            this.config.offsetX = val;
-            this.domeMaterial.uniforms.uOffsetX.value = val;
-            lOffX.textContent = val.toFixed(2);
-        });
+        if (sOffX) {
+            sOffX.addEventListener('input', (e) => {
+                const val = parseFloat(e.target.value);
+                this.config.offsetX = val;
+                this.domeMaterial.uniforms.uOffsetX.value = val;
+                if (lOffX) lOffX.textContent = val.toFixed(2);
+            });
+        }
 
         const sOffY = document.getElementById('slider-offset-y');
         const lOffY = document.getElementById('lbl-offset-y');
-        sOffY.addEventListener('input', (e) => {
-            const val = parseFloat(e.target.value);
-            this.config.offsetY = val;
-            this.domeMaterial.uniforms.uOffsetY.value = val;
-            lOffY.textContent = val.toFixed(2);
-        });
+        if (sOffY) {
+            sOffY.addEventListener('input', (e) => {
+                const val = parseFloat(e.target.value);
+                this.config.offsetY = val;
+                this.domeMaterial.uniforms.uOffsetY.value = val;
+                if (lOffY) lOffY.textContent = val.toFixed(2);
+            });
+        }
 
         const sRot = document.getElementById('slider-rotation');
         const lRot = document.getElementById('lbl-rotation');
-        sRot.addEventListener('input', (e) => {
-            const val = parseFloat(e.target.value);
-            this.config.rotation = val;
-            this.domeMaterial.uniforms.uRotation.value = (val * Math.PI) / 180;
-            lRot.textContent = `${val}°`;
-        });
+        if (sRot) {
+            sRot.addEventListener('input', (e) => {
+                const val = parseFloat(e.target.value);
+                this.config.rotation = val;
+                this.domeMaterial.uniforms.uRotation.value = (val * Math.PI) / 180;
+                if (lRot) lRot.textContent = `${val}°`;
+            });
+        }
 
         const sExp = document.getElementById('slider-exposure');
         const lExp = document.getElementById('lbl-exposure');
-        sExp.addEventListener('input', (e) => {
-            const val = parseFloat(e.target.value);
-            this.config.exposure = val;
-            this.domeMaterial.uniforms.uExposure.value = val;
-            lExp.textContent = `${val.toFixed(2)}x`;
-        });
+        if (sExp) {
+            sExp.addEventListener('input', (e) => {
+                const val = parseFloat(e.target.value);
+                this.config.exposure = val;
+                this.domeMaterial.uniforms.uExposure.value = val;
+                if (lExp) lExp.textContent = `${val.toFixed(2)}x`;
+            });
+        }
 
-        document.getElementById('chk-flip-x').addEventListener('change', (e) => {
-            this.config.flipX = e.target.checked;
-            this.domeMaterial.uniforms.uFlipX.value = e.target.checked;
-        });
+        const chkFlipX = document.getElementById('chk-flip-x');
+        if (chkFlipX) {
+            chkFlipX.addEventListener('change', (e) => {
+                this.config.flipX = e.target.checked;
+                this.domeMaterial.uniforms.uFlipX.value = e.target.checked;
+            });
+        }
 
-        document.getElementById('chk-flip-y').addEventListener('change', (e) => {
-            this.config.flipY = e.target.checked;
-            this.domeMaterial.uniforms.uFlipY.value = e.target.checked;
-        });
+        const chkFlipY = document.getElementById('chk-flip-y');
+        if (chkFlipY) {
+            chkFlipY.addEventListener('change', (e) => {
+                this.config.flipY = e.target.checked;
+                this.domeMaterial.uniforms.uFlipY.value = e.target.checked;
+            });
+        }
 
-        document.getElementById('btn-reset-calibration').addEventListener('click', () => {
-            sFov.value = 180; sFov.dispatchEvent(new Event('input'));
-            sScale.value = 1.0; sScale.dispatchEvent(new Event('input'));
-            sOffX.value = 0.0; sOffX.dispatchEvent(new Event('input'));
-            sOffY.value = 0.0; sOffY.dispatchEvent(new Event('input'));
-            sRot.value = 0; sRot.dispatchEvent(new Event('input'));
-            sExp.value = 1.0; sExp.dispatchEvent(new Event('input'));
-            document.getElementById('chk-flip-x').checked = false;
-            document.getElementById('chk-flip-x').dispatchEvent(new Event('change'));
-            document.getElementById('chk-flip-y').checked = false;
-            document.getElementById('chk-flip-y').dispatchEvent(new Event('change'));
-            this.showToast('Calibración restablecida');
-        });
+        const btnResetCal = document.getElementById('btn-reset-calibration');
+        if (btnResetCal) {
+            btnResetCal.addEventListener('click', () => {
+                if (sFov) { sFov.value = 180; sFov.dispatchEvent(new Event('input')); }
+                if (sScale) { sScale.value = 1.0; sScale.dispatchEvent(new Event('input')); }
+                if (sOffX) { sOffX.value = 0.0; sOffX.dispatchEvent(new Event('input')); }
+                if (sOffY) { sOffY.value = 0.0; sOffY.dispatchEvent(new Event('input')); }
+                if (sRot) { sRot.value = 0; sRot.dispatchEvent(new Event('input')); }
+                if (sExp) { sExp.value = 1.0; sExp.dispatchEvent(new Event('input')); }
+                if (chkFlipX) { chkFlipX.checked = false; chkFlipX.dispatchEvent(new Event('change')); }
+                if (chkFlipY) { chkFlipY.checked = false; chkFlipY.dispatchEvent(new Event('change')); }
+                this.showToast('Calibración restablecida');
+            });
+        }
     }
 
     /* --------------------------------------------------------------------------
@@ -692,17 +766,17 @@ class DomeViewer {
             playPromise.then(() => {
                 this.setPlayState(true);
             }).catch(err => {
-                console.warn('Autoplay prevenido por el navegador:', err);
-                // Si el navegador bloqueó la reproducción automática con audio, reintentar silenciado
+                console.warn('Autoplay prevenido:', err);
+                // Si el navegador bloqueó audio, reintentar silenciado
                 this.activeVideo.muted = true;
                 this.videoA.muted = true;
                 this.videoB.muted = true;
                 this.activeVideo.play().then(() => {
                     this.setPlayState(true);
                     this.updateVolumeIcons();
-                    this.showToast('Reproduciendo en silencio. Clic en el altavoz para activar el audio.', 4000);
+                    this.showToast('Reproduciendo en silencio. Clic en altavoz para sonido.', 4000);
                 }).catch(e => {
-                    console.error('Error al iniciar reproducción:', e);
+                    console.error('Error al reproducir:', e);
                     this.setPlayState(false);
                 });
             });
@@ -725,8 +799,10 @@ class DomeViewer {
 
     setPlayState(playing) {
         this.isPlaying = playing;
-        document.getElementById('icon-play').style.display = playing ? 'none' : 'block';
-        document.getElementById('icon-pause').style.display = playing ? 'block' : 'none';
+        const iconPlay = document.getElementById('icon-play');
+        const iconPause = document.getElementById('icon-pause');
+        if (iconPlay) iconPlay.style.display = playing ? 'none' : 'block';
+        if (iconPause) iconPause.style.display = playing ? 'block' : 'none';
     }
 
     toggleMute() {
@@ -738,12 +814,15 @@ class DomeViewer {
 
     updateVolumeIcons() {
         const isMuted = this.activeVideo.muted || this.activeVideo.volume === 0;
-        document.getElementById('icon-volume').style.display = isMuted ? 'none' : 'block';
-        document.getElementById('icon-mute').style.display = isMuted ? 'block' : 'none';
+        const iconVol = document.getElementById('icon-volume');
+        const iconMute = document.getElementById('icon-mute');
+        if (iconVol) iconVol.style.display = isMuted ? 'none' : 'block';
+        if (iconMute) iconMute.style.display = isMuted ? 'block' : 'none';
         if (!isMuted && this.activeVideo.volume === 0) {
             this.videoA.volume = 0.5;
             this.videoB.volume = 0.5;
-            document.getElementById('volume-slider').value = 0.5;
+            const volSlider = document.getElementById('volume-slider');
+            if (volSlider) volSlider.value = 0.5;
         }
     }
 
@@ -753,7 +832,9 @@ class DomeViewer {
     }
 
     scrub(e) {
-        const rect = document.getElementById('timeline-container').getBoundingClientRect();
+        const timeline = document.getElementById('timeline-container');
+        if (!timeline) return;
+        const rect = timeline.getBoundingClientRect();
         const pos = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
         const targetTime = pos * this.totalDuration;
         this.seekGlobalTime(targetTime);
@@ -762,23 +843,28 @@ class DomeViewer {
     updateTimelineWithTime(currentTime) {
         if (!this.totalDuration || this.totalDuration <= 0) return;
         const progress = (currentTime / this.totalDuration) * 100;
-        document.getElementById('timeline-progress').style.width = `${progress}%`;
-        document.getElementById('timeline-handle').style.left = `${progress}%`;
-        document.getElementById('time-current').textContent = this.formatTime(currentTime);
+        const pBar = document.getElementById('timeline-progress');
+        const handle = document.getElementById('timeline-handle');
+        const tCur = document.getElementById('time-current');
+        if (pBar) pBar.style.width = `${progress}%`;
+        if (handle) handle.style.left = `${progress}%`;
+        if (tCur) tCur.textContent = this.formatTime(currentTime);
 
-        // Buffer progress aproximado
+        // Buffer progress
         if (this.activeVideo.buffered.length > 0) {
             const bufferedLocal = this.activeVideo.buffered.end(this.activeVideo.buffered.length - 1);
             const segStart = this.isSegmentedMode ? (this.segments[this.currentSegmentIndex]?.start || 0) : 0;
             const bufferedGlobal = segStart + bufferedLocal;
             const bufferedPercent = (bufferedGlobal / this.totalDuration) * 100;
-            document.getElementById('timeline-buffer').style.width = `${Math.min(100, bufferedPercent)}%`;
+            const bBar = document.getElementById('timeline-buffer');
+            if (bBar) bBar.style.width = `${Math.min(100, bufferedPercent)}%`;
         }
     }
 
     updateTotalDuration() {
-        if (this.totalDuration) {
-            document.getElementById('time-total').textContent = this.formatTime(this.totalDuration);
+        const tTot = document.getElementById('time-total');
+        if (tTot && this.totalDuration) {
+            tTot.textContent = this.formatTime(this.totalDuration);
         }
     }
 
@@ -798,7 +884,8 @@ class DomeViewer {
             this.updateTotalDuration();
         }, { once: true });
         this.playVideo();
-        document.getElementById('file-name-badge').textContent = file.name;
+        const badge = document.getElementById('file-name-badge');
+        if (badge) badge.textContent = file.name;
         this.showToast(`Cargado archivo local: ${file.name}`);
     }
 
@@ -846,16 +933,17 @@ class DomeViewer {
     }
 
     resetUiTimeout() {
-        this.uiLayer.classList.remove('ui-hidden');
+        if (this.uiLayer) this.uiLayer.classList.remove('ui-hidden');
         clearTimeout(this.uiTimeout);
         this.uiTimeout = setTimeout(() => {
             if (!this.settingsDrawer.classList.contains('open') && this.isPlaying) {
-                this.uiLayer.classList.add('ui-hidden');
+                if (this.uiLayer) this.uiLayer.classList.add('ui-hidden');
             }
         }, 4000);
     }
 
     showToast(message, duration = 3000) {
+        if (!this.toastContainer) return;
         const toast = document.createElement('div');
         toast.className = 'toast';
         toast.innerHTML = `
@@ -880,30 +968,36 @@ class DomeViewer {
     animate() {
         requestAnimationFrame(() => this.animate());
 
-        // 1. Manejo de Teclado (WASD / Flechas)
+        // 1. Forzar actualización de textura de video en WebGL si hay datos
+        if (this.activeVideo && this.activeVideo.readyState >= this.activeVideo.HAVE_CURRENT_DATA) {
+            if (this.activeTexture) {
+                this.activeTexture.needsUpdate = true;
+            }
+        }
+
+        // 2. Manejo de Teclado (WASD / Flechas)
         const keySpeed = 1.2;
         if (this.keys['KeyA'] || this.keys['ArrowLeft']) this.targetYaw += keySpeed;
         if (this.keys['KeyD'] || this.keys['ArrowRight']) this.targetYaw -= keySpeed;
         if (this.keys['KeyW'] || this.keys['ArrowUp']) this.targetPitch = Math.min(89.9, this.targetPitch + keySpeed);
         if (this.keys['KeyS'] || this.keys['ArrowDown']) this.targetPitch = Math.max(-89.9, this.targetPitch - keySpeed);
 
-        // 2. Rotación automática
+        // 3. Rotación automática
         if (this.autoRotate && !this.isDragging) {
             this.targetYaw += this.autoRotateSpeed;
         }
 
-        // 3. Suavizado inercial (Lerp Damping)
+        // 4. Suavizado inercial (Lerp Damping)
         this.yaw += (this.targetYaw - this.yaw) * this.damping;
         this.pitch += (this.targetPitch - this.pitch) * this.damping;
         this.fov += (this.targetFov - this.fov) * this.damping;
 
-        // Actualizar FOV de la cámara
         if (Math.abs(this.camera.fov - this.fov) > 0.01) {
             this.camera.fov = this.fov;
             this.camera.updateProjectionMatrix();
         }
 
-        // 4. Calcular vector de dirección de la cámara (Coordenadas esféricas)
+        // 5. Vector de vista de la cámara
         const phi = THREE.MathUtils.degToRad(90 - this.pitch);
         const theta = THREE.MathUtils.degToRad(this.yaw);
 
@@ -913,13 +1007,13 @@ class DomeViewer {
 
         this.camera.lookAt(targetX, targetY, targetZ);
 
-        // 5. Actualizar aguja de la brújula
+        // 6. Aguja de brújula
         const needle = document.getElementById('compass-needle');
         if (needle) {
             needle.style.transform = `rotate(${-this.yaw}deg)`;
         }
 
-        // 6. Renderizar escena
+        // 7. Renderizar escena 3D
         this.renderer.render(this.scene, this.camera);
     }
 }
