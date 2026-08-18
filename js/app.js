@@ -999,11 +999,12 @@ class DomeViewer {
     animate() {
         requestAnimationFrame(() => this.animate());
 
-        // 1. Forzar actualización de textura de video en WebGL
-        if (this.activeVideo && this.activeVideo.readyState >= this.activeVideo.HAVE_CURRENT_DATA) {
-            if (this.activeTexture) {
-                this.activeTexture.needsUpdate = true;
-            }
+        // 1. Forzar actualización continua de textura de video en WebGL
+        if (this.activeTexture) {
+            this.activeTexture.needsUpdate = true;
+        }
+        if (this.domeMaterial && this.domeMaterial.uniforms && this.domeMaterial.uniforms.tVideo) {
+            this.domeMaterial.uniforms.tVideo.value = this.activeTexture;
         }
 
         // 2. Manejo de Teclado (WASD / Flechas)
