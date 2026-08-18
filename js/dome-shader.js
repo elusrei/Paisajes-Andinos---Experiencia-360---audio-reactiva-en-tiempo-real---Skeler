@@ -1,6 +1,6 @@
 /**
  * DomeShader - Shader de Alta Fidelidad para Proyección Fulldome / Fisheye y Esfera 360°
- * Sin descartes agresivos de píxeles, con soporte para 4K y clamping perfecto.
+ * Con desvanecimiento suave en el horizonte sin estiramiento de textura hacia el nadir.
  */
 
 const DomeShader = {
@@ -41,6 +41,7 @@ const DomeShader = {
         uniform bool uFlipY;
         uniform int uProjectionMode;
         uniform float uExposure;
+        uniform float uHemisphereOnly;
 
         varying vec3 vWorldPosition;
 
@@ -53,7 +54,7 @@ const DomeShader = {
 
             if (uProjectionMode == 0) {
                 // ==========================================================
-                // MODO 0: FULLDOME FISHEYE (Ojo de Pez Circular)
+                // MODO 0: FULLDOME FISHEYE (Ojo de Pez Circular de Cúpula)
                 // ==========================================================
                 float rXZ = length(dir.xz);
                 float theta = atan(rXZ, dir.y); // 0 en cenit (+Y), PI/2 en horizonte, PI en nadir
@@ -61,6 +62,12 @@ const DomeShader = {
 
                 float maxAngle = max(0.1, uDomeFov * 0.5);
                 float rho = theta / maxAngle;
+
+                // Fuera del horizonte del domo: desvanecer limpiamente a negro sin estirar textura
+                if (rho > 1.02) {
+                    gl_FragColor = vec4(0.015, 0.018, 0.025, 1.0);
+                    return;
+                }
 
                 float uCoord = 0.5 + uOffsetX + (0.5 * rho * cos(phi) * uScale);
                 float vCoord = 0.5 + uOffsetY + (0.5 * rho * sin(phi) * uScale);
@@ -71,7 +78,15 @@ const DomeShader = {
                 uv = clamp(vec2(uCoord, vCoord), 0.0, 1.0);
 
                 vec4 texColor = texture2D(tVideo, uv);
-                gl_FragColor = vec4(texColor.rgb * uExposure, 1.0);
+                vec3 finalRgb = texColor.rgb * uExposure;
+
+                // Suavizado elegante en el borde exacto del domo
+                if (rho > 0.96) {
+                    float fade = 1.0 - smoothstep(0.96, 1.02, rho);
+                    finalRgb = mix(vec3(0.015, 0.018, 0.025), finalRgb, fade);
+                }
+
+                gl_FragColor = vec4(finalRgb, 1.0);
 
             } else {
                 // ==========================================================

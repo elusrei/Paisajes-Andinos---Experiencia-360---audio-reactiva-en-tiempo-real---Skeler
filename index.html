@@ -3,16 +3,16 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Visor Domo 360° Fulldome | Experiencia Inmersiva</title>
-    <meta name="description" content="Visor interactivo en Three.js para video fisheye y proyección en domo / semiesfera 360">
+    <title>Paisajes Andinos - Experiencia Inmersiva Reactiva en Tiempo Real (Render) - Elián Reinoso</title>
+    <meta name="description" content="Experiencia Fulldome 360° interactiva con video 4K y audio reactivo en tiempo real">
+
+    <!-- Favicon Inline SVG -->
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><circle cx='12' cy='12' r='10' fill='%23ffffff'/></svg>">
 
     <!-- Fuentes Google -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-
-    <!-- Favicon Inline SVG -->
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><circle cx='12' cy='12' r='10' fill='%2300f0ff'/></svg>">
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 
     <!-- Estilos -->
     <link rel="stylesheet" href="css/style.css">
@@ -25,8 +25,8 @@
     <!-- Contenedor 3D WebGL -->
     <div id="canvas-container"></div>
 
-    <!-- Elementos de Video en Doble Búfer (Ping-Pong para reproducción continua sin cortes) -->
-    <video id="dome-video-a" playsinline webkit-playsinline preload="auto" style="position:absolute;top:0;left:0;width:4px;height:4px;opacity:0.001;pointer-events:none;z-index:-10;"></video>
+    <!-- Elementos de Video en Doble Búfer (Cero precarga inicial para 100% ahorro de datos) -->
+    <video id="dome-video-a" playsinline webkit-playsinline preload="none" style="position:absolute;top:0;left:0;width:4px;height:4px;opacity:0.001;pointer-events:none;z-index:-10;"></video>
     <video id="dome-video-b" playsinline webkit-playsinline preload="none" style="position:absolute;top:0;left:0;width:4px;height:4px;opacity:0.001;pointer-events:none;z-index:-10;"></video>
 
     <!-- Indicador de Carga / Buffering 4K -->
@@ -38,43 +38,28 @@
     <!-- Selector de Archivo Local Oculto -->
     <input type="file" id="file-input" accept="video/mp4,video/webm,video/ogg,image/*" style="display: none;">
 
-    <!-- Capa de Interfaz de Usuario (HUD) -->
+    <!-- ====================================================================
+         CAPA DE INTERFAZ DE USUARIO (HUD BLANCO TRANSLÚCIDO FROSTED GLASS)
+         ==================================================================== -->
     <div class="ui-layer" id="ui-layer">
         
         <!-- BARRA SUPERIOR -->
-        <header class="top-bar glass-panel interactive">
-            <div class="brand-section">
-                <div class="logo-badge">
-                    <svg viewBox="0 0 24 24">
-                        <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="1.5" fill="none"/>
-                        <path d="M12 3 A 9 9 0 0 1 12 21 A 9 9 0 0 0 12 3" fill="currentColor"/>
-                        <circle cx="12" cy="12" r="2.5" fill="currentColor"/>
-                    </svg>
-                </div>
-                <div class="brand-text">
-                    <h1>Domo 360° Fisheye Viewer</h1>
-                    <div class="brand-meta">
-                        <span class="status-tag">
-                            <span class="status-dot"></span>
-                            <span id="projection-badge">FULLDOME 180°</span>
-                        </span>
-                        <span id="file-name-badge">Paisajes andinos, Elián (4K Master)</span>
-                    </div>
-                </div>
+        <header class="top-bar glass-panel" id="top-bar">
+            <div class="top-brand">
+                <div class="brand-title">Paisajes Andinos - Experiencia Inmersiva Reactiva en Tiempo Real (Render) - Elián Reinoso</div>
             </div>
 
             <div class="top-actions">
                 <!-- Cargar otro archivo -->
-                <button class="btn-secondary" id="btn-load-file" title="Cargar otro video local">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <button class="btn-icon" id="btn-load-file" title="Cargar otro video local">
+                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                         <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
                     </svg>
-                    <span>Cargar Video</span>
                 </button>
 
                 <!-- Conmutar Semiesfera / Esfera Completa -->
-                <button class="btn-icon" id="btn-toggle-hemi" title="Alternar Semiesfera Superior / Esfera Completa">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <button class="btn-icon" id="btn-toggle-hemi" title="Alternar Semiesfera / Esfera Completa">
+                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                         <path d="M12 3a9 9 0 0 1 9 9H3a9 9 0 0 1 9-9z"/>
                         <path d="M3 12a9 9 0 0 0 18 0" stroke-dasharray="2 3"/>
                     </svg>
@@ -82,120 +67,134 @@
 
                 <!-- Captura de pantalla -->
                 <button class="btn-icon" id="btn-snapshot" title="Capturar Pantalla">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                         <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/>
                         <circle cx="12" cy="13" r="4"/>
                     </svg>
                 </button>
 
                 <!-- Calibración / Ajustes -->
-                <button class="btn-icon" id="btn-settings-toggle" title="Calibración y Ajustes del Domo">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <button class="btn-icon" id="btn-settings-toggle" title="Calibración y Ajustes">
+                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                         <circle cx="12" cy="12" r="3"/>
                         <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
                     </svg>
                 </button>
 
                 <!-- Consola de Diagnóstico / Debug -->
-                <button class="btn-icon" id="btn-debug-toggle" title="Abrir Panel de Debug y Diagnóstico en Pantalla (D)">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <button class="btn-icon" id="btn-debug-toggle" title="Panel de Debug (Tecla D)">
+                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                         <path d="M4 17l6-6-6-6m8 14h8"/>
                     </svg>
                 </button>
 
                 <!-- Pantalla Completa -->
                 <button class="btn-icon" id="btn-fullscreen" title="Pantalla Completa (F)">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                         <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
                     </svg>
                 </button>
             </div>
         </header>
 
-        <!-- WIDGET BRÚJULA / ORIENTACIÓN -->
-        <div class="orientation-widget interactive" id="orientation-widget" title="Hacer clic para mirar al Cenit (Arriba)">
-            <div class="compass-ring">
-                <div class="compass-needle" id="compass-needle"></div>
+        <!-- WIDGET BRÚJULA MULTIEJE REESTRUCTURADA (PÚAS TRIANGULARES) -->
+        <div class="orientation-widget" id="orientation-widget" title="Hacé clic para reorientar al ángulo de inicio">
+            <div class="compass-multi-axis">
+                <div class="axis-ring ring-outer"></div>
+                <div class="axis-ring ring-middle"></div>
+                <div class="axis-ring ring-inner"></div>
+                <!-- Agujas triangulares de los 2 ejes -->
+                <div class="needle-triangle needle-north" id="needle-north"></div>
+                <div class="needle-triangle needle-south" id="needle-south"></div>
+                <div class="needle-triangle needle-east" id="needle-east"></div>
+                <div class="needle-triangle needle-west" id="needle-west"></div>
+                <div class="compass-center-core"></div>
             </div>
-            <div class="compass-zenith-dot"></div>
         </div>
 
-        <!-- BARRA INFERIOR / REPRODUCTOR -->
-        <footer class="bottom-bar glass-panel interactive">
+        <!-- BARRA INFERIOR / REPRODUCTOR REORGANIZADO -->
+        <footer class="bottom-bar glass-panel" id="bottom-bar">
             
-            <!-- Barra de Tiempo (Scrubber) -->
-            <div class="timeline-container" id="timeline-container">
-                <div class="timeline-track">
-                    <div class="timeline-buffer" id="timeline-buffer"></div>
-                    <div class="timeline-progress" id="timeline-progress"></div>
-                    <div class="timeline-handle" id="timeline-handle"></div>
-                </div>
+            <!-- 1. IZQUIERDA: Play / Pausa + Stop -->
+            <div class="bar-section left-controls">
+                <button class="btn-control-main" id="btn-play-pause" title="Reproducir / Pausar (Espacio)">
+                    <svg id="icon-play" width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                        <polygon points="6 4 20 12 6 20 6 4"/>
+                    </svg>
+                    <svg id="icon-pause" width="20" height="20" viewBox="0 0 24 24" fill="currentColor" style="display: none;">
+                        <rect x="6" y="4" width="4" height="16" rx="1"/>
+                        <rect x="14" y="4" width="4" height="16" rx="1"/>
+                    </svg>
+                </button>
+
+                <button class="btn-control-sub" id="btn-stop" title="Detener y volver al inicio (0:00)">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+                        <rect x="5" y="5" width="14" height="14" rx="2"/>
+                    </svg>
+                </button>
             </div>
 
-            <!-- Fila de Controles -->
-            <div class="controls-row">
+            <!-- 2. CENTRO: Línea de tiempo unificada -->
+            <div class="bar-section center-timeline">
+                <span class="time-label" id="time-current">00:00</span>
                 
-                <!-- Controles Izquierda (Play, Volumen, Tiempo) -->
-                <div class="left-controls">
-                    <button class="btn-play-pause" id="btn-play-pause" title="Reproducir / Pausar (Espacio)">
-                        <svg id="icon-play" viewBox="0 0 24 24"><polygon points="6 3 20 12 6 21 6 3"/></svg>
-                        <svg id="icon-pause" viewBox="0 0 24 24" style="display: none;"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
-                    </button>
-
-                    <div class="volume-group">
-                        <button class="btn-icon" id="btn-mute" title="Silenciar / Activar Audio (M)">
-                            <svg id="icon-volume" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
-                                <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/>
-                            </svg>
-                            <svg id="icon-mute" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none;">
-                                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
-                                <line x1="23" y1="9" x2="17" y2="15"/>
-                                <line x1="17" y1="9" x2="23" y2="15"/>
-                            </svg>
-                        </button>
-                        <input type="range" class="volume-slider" id="volume-slider" min="0" max="1" step="0.05" value="1">
-                    </div>
-
-                    <div class="time-display">
-                        <span class="current" id="time-current">00:00</span> / <span id="time-total">00:00</span>
+                <div class="timeline-container" id="timeline-container">
+                    <div class="timeline-track">
+                        <div class="timeline-buffer" id="timeline-buffer"></div>
+                        <div class="timeline-progress" id="timeline-progress"></div>
+                        <div class="timeline-handle" id="timeline-handle"></div>
                     </div>
                 </div>
 
-                <!-- Controles Centro: Presets de Ángulo de Visión -->
-                <div class="center-controls presets-group">
-                    <button class="btn-preset active" data-view="zenith" title="Mirar arriba al centro del domo">Cenit (Arriba)</button>
-                    <button class="btn-preset" data-view="front" title="Mirar al frente horizontal">Frente</button>
-                    <button class="btn-preset" data-view="back" title="Mirar atrás">Atrás</button>
-                    <button class="btn-preset" data-view="left" title="Mirar izquierda">Izq</button>
-                    <button class="btn-preset" data-view="right" title="Mirar derecha">Der</button>
-                </div>
+                <span class="time-label" id="time-total">03:38</span>
+            </div>
 
-                <!-- Controles Derecha (Velocidad, Auto-rotación, Modo) -->
-                <div class="right-controls">
-                    <button class="btn-secondary" id="btn-speed" title="Velocidad de Reproducción">1.0x</button>
-                    
-                    <button class="btn-icon" id="btn-auto-rotate" title="Rotación Automática Suave">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+            <!-- 3. DERECHA: Volumen Vertical + Fullscreen -->
+            <div class="bar-section right-controls">
+                
+                <!-- Contenedor de Volumen con Slider Vertical Flotante -->
+                <div class="volume-container" id="volume-container">
+                    <button class="btn-control-sub" id="btn-mute" title="Silenciar / Activar sonido (M)">
+                        <svg id="icon-volume" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+                            <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+                            <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
+                        </svg>
+                        <svg id="icon-mute" width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="display: none;">
+                            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+                            <line x1="23" y1="9" x2="17" y2="15"/>
+                            <line x1="17" y1="9" x2="23" y2="15"/>
                         </svg>
                     </button>
 
-                    <button class="btn-secondary" id="btn-projection-toggle" title="Cambiar Proyección: Fisheye Fulldome / Equirectangular">
-                        <span>Fisheye</span>
-                    </button>
+                    <!-- Slider Vertical Flotante -->
+                    <div class="volume-slider-vertical-wrapper" id="volume-slider-wrapper">
+                        <input type="range" id="volume-slider" min="0" max="1" step="0.05" value="1" orient="vertical">
+                    </div>
                 </div>
 
+                <!-- Botón Alternar Proyección Fisheye / Equirectangular -->
+                <button class="btn-pill-mode" id="btn-projection-toggle" title="Cambiar Proyección">
+                    <span>Fisheye</span>
+                </button>
+
+                <!-- Pantalla Completa Inferior -->
+                <button class="btn-control-sub" id="btn-fullscreen-bottom" title="Pantalla Completa (F)">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                        <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
+                    </svg>
+                </button>
             </div>
+
         </footer>
 
     </div>
 
     <!-- PANEL DE DIAGNÓSTICO Y DEBUG EN PANTALLA -->
-    <div class="debug-panel glass-panel interactive hidden" id="debug-panel">
+    <div class="debug-panel glass-panel hidden" id="debug-panel">
         <div class="debug-header">
             <h4>
-                <span class="status-dot green"></span>
+                <span class="status-dot"></span>
                 <span>DIAGNÓSTICO EN VIVO (4K STREAM)</span>
             </h4>
             <button class="btn-icon-sm" id="btn-close-debug">✕</button>
@@ -243,7 +242,6 @@
             <button class="btn-debug-act" id="dbg-btn-copy" style="grid-column: span 2;">📋 Copiar Reporte</button>
         </div>
 
-        <!-- Mini Preview de Video Nativo -->
         <div class="debug-pip-container hidden" id="debug-pip-container">
             <div class="debug-pip-label">Previsualización Directa de Video (DOM Nativo):</div>
             <div class="debug-pip-view" id="debug-pip-view"></div>
@@ -256,10 +254,10 @@
     </div>
 
     <!-- PANEL LATERAL DE CALIBRACIÓN DEL DOMO -->
-    <aside class="settings-drawer glass-panel interactive" id="settings-drawer">
+    <aside class="settings-drawer glass-panel" id="settings-drawer">
         <div class="drawer-header">
             <h3>
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                     <circle cx="12" cy="12" r="3"/>
                     <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
                 </svg>
@@ -268,61 +266,54 @@
             <button class="btn-icon" id="btn-close-settings" style="width: 32px; height: 32px;">✕</button>
         </div>
 
-        <!-- Cobertura Angular (Domo FOV) -->
         <div class="setting-item">
             <div class="setting-label">
-                <span>Ángulo del Domo (FOV)</span>
-                <span class="val" id="lbl-dome-fov">180°</span>
+                <span>Cobertura Domo (FOV)</span>
+                <span class="setting-value" id="lbl-dome-fov">180°</span>
             </div>
-            <input type="range" class="slider-custom" id="slider-dome-fov" min="120" max="240" step="1" value="180">
+            <input type="range" class="custom-slider" id="slider-dome-fov" min="90" max="240" step="1" value="180">
         </div>
 
-        <!-- Escala / Zoom del círculo Fisheye -->
         <div class="setting-item">
             <div class="setting-label">
-                <span>Escala Fisheye (Zoom)</span>
-                <span class="val" id="lbl-scale">1.00x</span>
+                <span>Escala Óptica (Zoom)</span>
+                <span class="setting-value" id="lbl-scale">1.00x</span>
             </div>
-            <input type="range" class="slider-custom" id="slider-scale" min="0.5" max="1.6" step="0.01" value="1.0">
+            <input type="range" class="custom-slider" id="slider-scale" min="0.5" max="2.0" step="0.01" value="1.0">
         </div>
 
-        <!-- Desplazamiento X (Centro óptico) -->
         <div class="setting-item">
             <div class="setting-label">
-                <span>Desplazamiento Centro X</span>
-                <span class="val" id="lbl-offset-x">0.00</span>
+                <span>Desplazamiento X</span>
+                <span class="setting-value" id="lbl-offset-x">0.00</span>
             </div>
-            <input type="range" class="slider-custom" id="slider-offset-x" min="-0.2" max="0.2" step="0.005" value="0.0">
+            <input type="range" class="custom-slider" id="slider-offset-x" min="-0.5" max="0.5" step="0.005" value="0.0">
         </div>
 
-        <!-- Desplazamiento Y (Centro óptico) -->
         <div class="setting-item">
             <div class="setting-label">
-                <span>Desplazamiento Centro Y</span>
-                <span class="val" id="lbl-offset-y">0.00</span>
+                <span>Desplazamiento Y</span>
+                <span class="setting-value" id="lbl-offset-y">0.00</span>
             </div>
-            <input type="range" class="slider-custom" id="slider-offset-y" min="-0.2" max="0.2" step="0.005" value="0.0">
+            <input type="range" class="custom-slider" id="slider-offset-y" min="-0.5" max="0.5" step="0.005" value="0.0">
         </div>
 
-        <!-- Rotación Azimutal de la Textura -->
         <div class="setting-item">
             <div class="setting-label">
-                <span>Rotación Textura</span>
-                <span class="val" id="lbl-rotation">0°</span>
+                <span>Rotación Azimutal</span>
+                <span class="setting-value" id="lbl-rotation">0°</span>
             </div>
-            <input type="range" class="slider-custom" id="slider-rotation" min="0" max="360" step="1" value="0">
+            <input type="range" class="custom-slider" id="slider-rotation" min="0" max="360" step="1" value="0">
         </div>
 
-        <!-- Brillo / Exposición -->
         <div class="setting-item">
             <div class="setting-label">
-                <span>Exposición / Brillo</span>
-                <span class="val" id="lbl-exposure">1.0x</span>
+                <span>Brillo / Exposición</span>
+                <span class="setting-value" id="lbl-exposure">1.00x</span>
             </div>
-            <input type="range" class="slider-custom" id="slider-exposure" min="0.5" max="2.0" step="0.05" value="1.0">
+            <input type="range" class="custom-slider" id="slider-exposure" min="0.2" max="3.0" step="0.05" value="1.0">
         </div>
 
-        <!-- Toggles de Inversión -->
         <div class="toggle-group">
             <span>Espejar Horizontal (Flip X)</span>
             <label class="switch">
@@ -339,69 +330,71 @@
             </label>
         </div>
 
-        <!-- Botón Reset -->
         <button class="btn-secondary" id="btn-reset-calibration" style="width: 100%; justify-content: center; margin-top: 0.5rem;">
             Restablecer Valores por Defecto
         </button>
     </aside>
 
-    <!-- PANTALLA DE BIENVENIDA / SPLASH SCREEN -->
-    <div class="splash-overlay" id="splash-screen">
-        <div class="splash-card glass-panel">
-            <div class="splash-icon-wrapper">
-                <svg viewBox="0 0 24 24">
-                    <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="1.5" fill="none"/>
-                    <path d="M12 2 A 10 10 0 0 1 12 22 A 10 10 0 0 0 12 2" fill="currentColor"/>
+    <!-- ====================================================================
+         1. MODAL DE ADVERTENCIA DE DATOS MÓVILES (PUERTA DE ENTRADA CON CERO DESCARGAS)
+         ==================================================================== -->
+    <div class="warning-overlay" id="data-warning-modal">
+        <div class="warning-card glass-card">
+            <div class="warning-icon-wrapper">
+                <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                    <path d="M5 12.55a11 11 0 0 1 14.08 0"/>
+                    <path d="M1.42 9a16 16 0 0 1 21.16 0"/>
+                    <path d="M8.53 16.11a6 6 0 0 1 6.95 0"/>
+                    <line x1="12" y1="20" x2="12.01" y2="20"/>
                 </svg>
             </div>
+            <h3>Aviso antes de entrar</h3>
+            <p>Esta página carga contenido <strong>4K</strong> de alta definición, recomendado que actives el <strong>Wi-Fi</strong>.</p>
             
-            <h2>Visor Fulldome 360°</h2>
-            <p>Visualización interactiva desde el interior de la semiesfera superior con mapeo de deformación ojo de pez para domo.</p>
+            <div class="warning-actions">
+                <button class="btn-frosted-primary" id="btn-data-continue">
+                    <span>Continuar de todas formas</span>
+                </button>
+                <button class="btn-frosted-secondary" id="btn-data-reload" onclick="window.location.reload();">
+                    <span>Recargar página</span>
+                </button>
+            </div>
+        </div>
+    </div>
 
-            <div class="file-info-badge">
-                Archivo objetivo: Paisajes andinos, Elián (4K Master - 8 Segmentos Fluídos)
+    <!-- ====================================================================
+         2. PANTALLA DE BIENVENIDA CON FONDO GIRATORIO DESENFOCADO
+         ==================================================================== -->
+    <div class="splash-overlay hidden" id="splash-screen">
+        
+        <!-- Fondo animado girando y desenfocado con imagen-fondo.jpg -->
+        <div class="splash-bg-rotator" style="background-image: url('imagen-fondo.jpg');"></div>
+        <div class="splash-bg-dimmer"></div>
+
+        <div class="splash-card glass-card">
+            
+            <div class="splash-badge">VISOR FULLDOME 360°</div>
+            
+            <div class="splash-description">
+                Experiencia Inmersiva Reactiva en Tiempo Real (Render) con imagenes inspiradas en los paisajes Andinos de la Patagonia Argentina. Experiencia trabajada con programación utilizando herramientas como Processing, GLSL, OpenCV, Antigravity, Gemini, Sistema de decodificación/fragmentación sonora, código por instancias vivo que muta organicamente sin reactividad lineal.
             </div>
 
-            <div class="instructions-grid">
-                <div class="instruction-item">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <rect x="5" y="2" width="14" height="20" rx="7"/>
-                        <path d="M12 6v4"/>
-                    </svg>
-                    <span><strong>Clic y arrastrar:</strong> Mirar alrededor y hacia el cenit</span>
-                </div>
-                <div class="instruction-item">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <circle cx="12" cy="12" r="10"/>
-                        <path d="M12 8v8m-4-4h8"/>
-                    </svg>
-                    <span><strong>Rueda del ratón:</strong> Zoom angular (FOV)</span>
-                </div>
-                <div class="instruction-item">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <rect x="2" y="4" width="20" height="16" rx="2"/>
-                        <path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M8 16h8"/>
-                    </svg>
-                    <span><strong>Teclado:</strong> WASD o Flechas, Espacio, F</span>
-                </div>
-                <div class="instruction-item">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
-                    </svg>
-                    <span><strong>Arrastrar archivo:</strong> Cargar cualquier MP4</span>
-                </div>
+            <div class="splash-signature">
+                Gracias por pasarte, Elián.
             </div>
 
-            <button class="btn-primary" id="btn-enter" onclick="if(window.app){window.app.enterExperience();}else{document.getElementById('splash-screen').style.display='none';}" style="width: 100%; justify-content: center; font-size: 1rem; padding: 0.9rem;">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><polygon points="6 3 20 12 6 21 6 3"/></svg>
-                <span>Entrar a la Experiencia</span>
+            <button class="btn-frosted-enter" id="btn-enter">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                    <polygon points="6 3 20 12 6 21 6 3"/>
+                </svg>
+                <span>Entrar a la experiencia</span>
             </button>
         </div>
     </div>
 
     <!-- ZONA DE ARRASTRE PARA ARCHIVOS (DRAG & DROP) -->
     <div class="dropzone-overlay" id="dropzone">
-        <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="var(--primary)" stroke-width="2">
+        <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="1.8">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
         </svg>
         <h2>Suelta el archivo de video aquí</h2>
@@ -411,7 +404,7 @@
     <!-- CONTENEDOR DE NOTIFICACIONES TOAST -->
     <div class="toast-container" id="toast-container"></div>
 
-    <!-- SCRIPTS -->
+    <!-- Scripts de la Aplicación -->
     <script src="js/dome-shader.js"></script>
     <script src="js/app.js"></script>
 </body>
